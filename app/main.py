@@ -325,6 +325,28 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
         state = session_mgr.update_state(request.session_id, nlu)
         active_filters = state.to_filters()
 
+        # Step b.2: In-memory sorting for contextual follow-up sort requests
+        is_sort_request = (
+            nlu.intent == "sort"
+            or (nlu.sort is not None and not nlu.query)
+        )
+        if is_sort_request and state.last_results:
+            sort_desc = (nlu.sort == "price_desc")
+            sorted_products = sorted(
+                state.last_results,
+                key=lambda p: float(p.get("price", 0.0)),
+                reverse=sort_desc,
+            )
+            state.last_results = sorted_products
+            reply = "تم ترتيب المنتجات من الأعلى سعراً إلى الأقل:" if sort_desc else "تم ترتيب المنتجات من الأقل سعراً إلى الأعلى:"
+            return ChatResponse(
+                session_id=request.session_id,
+                reply=reply,
+                intent="sort",
+                filters=active_filters,
+                products=[CatalogProductItem(**p) for p in sorted_products],
+            )
+
         # Step c: Execute retrieval with merged session filters
         target_query = state.query if (nlu.intent in ("refine", "sort") and state.query) else request.message
         retrieval_res = retriever.retrieve(

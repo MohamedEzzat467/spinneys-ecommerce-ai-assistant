@@ -81,6 +81,18 @@ SWEETENER_TERMS_RE = re.compile(
     r"محلي|مُحلّي|ستيفيا|شوجر ماتش|سويتنر|أقراص الستيفيا|سكر دايت|بدائل السكر|sweetener|stevia|sugar match|diet sugar",
     re.IGNORECASE,
 )
+DAIRY_TERMS_RE = re.compile(
+    r"\b(لبن|حليب|زبادي|زبادو|جبن|جبنة|قشطة|milk|yogurt|dairy|cheese|laban)\b",
+    re.IGNORECASE,
+)
+NON_FOOD_CATEGORIES = {
+    "beauty & personal care",
+    "households",
+    "electronics",
+    "stationery",
+    "home & garden",
+    "toys",
+}
 
 
 class ProductRetriever:
@@ -338,6 +350,8 @@ class ProductRetriever:
         in_stock = filters.get("in_stock")
         sort_order = filters.get("sort")
         keyword = filters.get("query")
+        if keyword:
+            keyword = sanitize_query(keyword)
 
         # Step 2: In-Memory Fast Filtering (Vectorized Numpy / Pandas)
         df = self.df_meta
@@ -386,6 +400,11 @@ class ProductRetriever:
         is_explicit_sweetener = bool(SWEETENER_EXPLICIT_RE.search(query))
         if is_diet_or_healthy and not is_explicit_sweetener and "_is_sweetener" in df.columns:
             mask &= (~df["_is_sweetener"])
+
+        # 7. Exclude non-food categories for food/dairy queries
+        is_dairy_query = bool(DAIRY_TERMS_RE.search(norm_q)) or (bool(keyword) and bool(DAIRY_TERMS_RE.search(keyword)))
+        if is_dairy_query:
+            mask &= (~df["_category_lower"].isin(NON_FOOD_CATEGORIES))
 
         candidate_df = df[mask]
         total_matched = len(candidate_df)
@@ -451,13 +470,22 @@ class ProductRetriever:
                     candidate_ids=candidate_ids,
                 )
                 if bm25_results:
-                    # Boost in-stock candidates
+                    # Boost in-stock candidates and dairy relevance
                     scored_candidates = []
                     for pid, score in bm25_results:
                         p_rec = self.products_by_id.get(pid)
                         avail = p_rec["availability"] if p_rec else False
-                        # +2.0 boost for in-stock items
-                        final_score = score + (2.0 if avail else 0.0)
+                        p_name = (str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower() if p_rec else ""
+                        p_cat = str(p_rec.get("category", "")).lower() if p_rec else ""
+
+                        bonus = 2.0 if avail else 0.0
+                        if is_dairy_query:
+                            if any(k in p_cat for k in ("dairy", "cheese", "beverage")):
+                                bonus += 3.0
+                            if any(k in p_name for k in ("لبن", "حليب", "milk")):
+                                bonus += 5.0
+
+                        final_score = score + bonus
                         scored_candidates.append((pid, final_score))
 
                     scored_candidates.sort(key=lambda x: x[1], reverse=True)

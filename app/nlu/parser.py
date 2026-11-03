@@ -145,15 +145,47 @@ RECOMMEND_RE = re.compile(
 
 # Sort triggers
 SORT_DESC_RE = re.compile(
-    r"\b(رتب بالسعر تنازلي|رتب تنازلي|سعر تنازلي|تنازلي|من الاغلى|الاغلى|highest price|most expensive|price high to low|sort desc|el aghla|men el aghla|aghla|rateb men el aghla)\b",
+    r"\b("
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاعلى\s*سعرا?\s*(?:الى|الي|لـ?)\s*الاقل|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأعلى\s*سعراً?\s*(?:الى|الي|لـ?)\s*الأقل|"
+    r"من\s*الاعلى\s*سعرا?\s*(?:الى|الي|لـ?)\s*الاقل|"
+    r"من\s*الأعلى\s*سعراً?\s*(?:الى|الي|لـ?)\s*الأقل|"
+    r"من\s*الاعلى\s*(?:الى|الي|لـ?)\s*الاقل|"
+    r"من\s*الأعلى\s*(?:الى|الي|لـ?)\s*الأقل|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاعلى|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأعلى|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاغلى\s*(?:الى|الي|لـ?)\s*الارخص|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأغلى\s*(?:الى|الي|لـ?)\s*الأرخص|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاغلى|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأغلى|"
+    r"الاعلى\s*سعرا?|"
+    r"الأعلى\s*سعراً?|"
+    r"رتب بالسعر تنازلي|رتب تنازلي|سعر تنازلي|تنازلي|من الاغلى|الاغلى|الأغلى|"
+    r"highest price|most expensive|price high to low|sort desc|el aghla|men el aghla|aghla|rateb men el aghla"
+    r")\b",
     re.IGNORECASE,
 )
 
 SORT_ASC_RE = re.compile(
-    r"\b(رتب من الارخص للاغلى|رتب من الارخص|رتب بالسعر تصاعدي|رتب بالسعر|رتب تصاعدي|سعر تصاعدي|تصاعدي|"
-    r"من الارخص|الارخص الاول|الارخص|ارخص|cheapest first|cheapest|cheap|lowest price|price low to high|"
+    r"\b("
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاقل\s*سعرا?\s*(?:الى|الي|لـ?)\s*الاعلى|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأقل\s*سعراً?\s*(?:الى|الي|لـ?)\s*الأعلى|"
+    r"من\s*الاقل\s*سعرا?\s*(?:الى|الي|لـ?)\s*الاعلى|"
+    r"من\s*الأقل\s*سعراً?\s*(?:الى|الي|لـ?)\s*الأعلى|"
+    r"من\s*الاقل\s*(?:الى|الي|لـ?)\s*الاعلى|"
+    r"من\s*الأقل\s*(?:الى|الي|لـ?)\s*الأعلى|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاقل|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأقل|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الارخص\s*(?:الى|الي|لـ?)\s*الاغلى|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأرخص\s*(?:الى|الي|لـ?)\s*الأغلى|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الارخص للاغلى|رتب من الارخص للاغلى|رتب من الارخص|رتب بالسعر تصاعدي|رتب بالسعر|رتب تصاعدي|سعر تصاعدي|تصاعدي|"
+    r"الاقل\s*سعرا?|"
+    r"الأقل\s*سعراً?|"
+    r"من الارخص|الارخص الاول|الارخص|ارخص|الأرخص|أرخص|"
+    r"cheapest first|cheapest|cheap|lowest price|price low to high|"
     r"sort by price|sort by lowest|sort by el arkhas|sort by|sort asc|rateb bel se3r el arkhas|rateb bel se3r|"
-    r"rateb men el arkhas|هات الارخص الاول|show cheapest first|el arkhas|arkhas)\b",
+    r"rateb men el arkhas|هات الارخص الاول|show cheapest first|el arkhas|arkhas"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -197,7 +229,8 @@ def _extract_unsupported_filters(normalized: str) -> list[str]:
 def sanitize_query(raw_text: str) -> str:
     """
     Sanitizes customer queries by stripping generic action verbs, request stems,
-    generic meal/item request stems, and punctuation, preserving the core entity/attribute.
+    qualifiers/superlatives (افضل, نوع), meal/item request stems, and punctuation,
+    preserving the core entity/attribute.
     """
     text = raw_text.strip()
     # 1. Clean punctuation (Arabic question mark ؟, English ?, !, commas, etc.)
@@ -207,15 +240,24 @@ def sanitize_query(raw_text: str) -> str:
     # 2. Generic action verbs and request stems
     request_stems_re = re.compile(
         r"\b(اقترح\w*|اقتراح\w*|ورشح\w*|رشح\w*|ترشح\w*|عايز\w*|عاوز\w*|عايزين|محتاج\w*|ممكن|"
-        r"لو سمحت|من فضلك|وريني|هاتلي|اعرضلي|قولي|ابحث عن|دورلي على|دورلي|"
+        r"لو سمحت|من فضلك|وريني|هاتلي|هات|اعرضلي|قولي|ابحث عن|دورلي على|دورلي|"
         r"suggest\w*|recommend\w*|show me|find me|i want|i need|give me|please)\b",
         re.IGNORECASE,
     )
     norm = request_stems_re.sub(" ", norm)
 
-    # 3. Generic meal/item words when used as requests
+    # 3. Superlatives, comparatives, and generic qualifiers (افضل, احسن, نوع, انواع)
+    qualifiers_re = re.compile(
+        r"\b(و?افضل\w*|و?أفضل\w*|و?احسن\w*|و?أحسن\w*|و?اجود\w*|و?أجود\w*|"
+        r"و?نوع\w*|و?انواع\w*|و?أنواع\w*|و?صنف\w*|و?اصناف\w*|و?أصناف\w*|"
+        r"best|top|finest|types?|kinds?)\b",
+        re.IGNORECASE,
+    )
+    norm = qualifiers_re.sub(" ", norm)
+
+    # 4. Generic meal/item words when used as requests
     meal_stems_re = re.compile(
-        r"\b(وجب[هة]|اكل[هة]|اكل|طبيخ|حاج[هة]|منتج\w*|عناصر|meal|food|dish)\b",
+        r"\b(وجب[هة]|اكل[هة]|اكل|طبيخ|حاج[هة]|منتج\w*|عناصر|meal|food|dish|items?)\b",
         re.IGNORECASE,
     )
     norm = meal_stems_re.sub(" ", norm)
@@ -257,15 +299,26 @@ def _clean_query_string(raw: str, brand: Optional[str], unsupported: list[str]) 
 
     # Remove conversational filler words and constraint modifier words
     fillers = [
-        r"\b(عايز|عاوز|محتاج|ابحث عن|ابحث|دورلي على|دورلي|هاتلي|اعرضلي|وريني|فين|من فضلك|لو سمحت|بس|فقط)\b",
+        r"\b(عايز|عاوز|محتاج|ابحث عن|ابحث|دورلي على|دورلي|هاتلي|هات|اعرضلي|وريني|فين|من فضلك|لو سمحت|بس|فقط)\b",
         r"\b(show me|find me|i want|i need|looking for|search for|give me|please|only|just|where is the|where is|show)\b",
         r"\b(3ayez|hatly|warini|please|feen el|feen|first)\b",
-        r"\b(مارك[هة]|براند|brand|items?|منتجات?|في الفرع|in store|store|branch|price|سعر|اي|مش فارق|معايا|remove|filter|fine|is fine|all|any|bas|el|rateb|رتب)\b",
+        r"\b(مارك[هة]|براند|brand|items?|منتجات?|في الفرع|in store|store|branch|price|سعر|اي|مش فارق|معايا|remove|filter|fine|is fine|all|any|bas|el|rateb|رتب|رتبهم|رتبهن|رتبها)\b",
         r"\b(بديل لـ?|بديل ل|بديل|alternative for|alternative|substitute for|substitute|badeel le|badeel)\b",
         r"\b(الفرق بين|قارن بين|قارن|مقارنة|difference between|compare|versus|vs|2aren ben|2aren)\b",
         r"\b(ينفع مع|يمشي مع|goes well with|eh yenfa3 ma3|this|that|ده|دي|دا|da|di)\b",
         r"\b(اقترح عليا|اقترح|اقتراح|رشح|ترشحهولي|ترشحهالي|ترشحلي|ترشح|recommend|suggest|what do you recommend for|what do you recommend|ideas for|e2tra7 3alaya|e2tra7|ايه احسن)\b",
+        r"\b(افضل|أفضل|احسن|أحسن|اجود|أجود|نوع|انواع|أنواع|صنف|اصناف|أصناف|best|top|types?|kinds?)\b",
+        r"\b(الاعلى|الأعلى|الاقل|الأقل|الاغلى|الأغلى|الارخص|الأرخص|سعرا|سعر|من|الى|الي|لـ)\b",
     ]
+    for filler in fillers:
+        cleaned = re.sub(filler, " ", cleaned, flags=re.IGNORECASE)
+
+    # Remove unsupported tags
+    for _, tag in UNSUPPORTED_FILTER_PATTERNS:
+        cleaned = re.sub(rf"\b{re.escape(tag)}\b", " ", cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned if len(cleaned) >= 2 else None
     for filler in fillers:
         cleaned = re.sub(filler, " ", cleaned, flags=re.IGNORECASE)
 
@@ -390,9 +443,9 @@ def _rule_based_parse(raw_text: str, normalized: str) -> dict[str, Any]:
         brand = None
         if healthy_kw_match and "diet" not in unsupported_filters:
             unsupported_filters.append("diet")
-    elif sort is not None and not query:
+    elif sort is not None:
         intent = "sort"
-        follow_up_type = "refinement"
+        follow_up_type = "refinement" if not query else "new_topic"
     elif is_cancellation or ((price_max is not None or price_min is not None or in_stock is not None or brand is not None) and not query):
         intent = "refine"
         if not is_cancellation:
@@ -446,7 +499,7 @@ COMPACT_SYSTEM_PROMPT = (
     '"query":str|null,"brand":str|null,"category":str|null,'
     '"price_min":float|null,"price_max":float|null,"in_stock":bool|null,"sort":"price_asc|price_desc"|null,'
     '"explicit_fields":[str],"unsupported_filters":[str]}\n'
-    "Rules: brand canonical only. unsupported_filters: dietary (sugar-free, organic, etc)."
+    "Rules: brand canonical only. unsupported_filters: dietary. strip superlatives/qualifiers (best/type/افضل/نوع). sorting alone -> intent:sort."
 )
 
 

@@ -37,6 +37,14 @@ class SessionState:
     last_results: list[dict[str, Any]] = field(default_factory=list)
     turn_count: int = 0
 
+    @property
+    def last_products(self) -> list[dict[str, Any]]:
+        return self.last_results
+
+    @last_products.setter
+    def last_products(self, products: list[dict[str, Any]]) -> None:
+        self.last_results = products
+
     def to_filters(self) -> dict[str, Any]:
         """Converts the active session constraints to a dictionary for retrieval."""
         filters: dict[str, Any] = {}
