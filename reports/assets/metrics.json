@@ -1,0 +1,245 @@
+{
+  "catalog": {
+    "total_products": 25881,
+    "total_skus": 25881,
+    "total_tables": 30,
+    "valid_priced": 25803,
+    "price_sources": 25803,
+    "stock_sources": 66,
+    "stock_sku_count": 25787,
+    "zero_price_count": 78
+  },
+  "availability": {
+    "in_stock": 22721,
+    "out_of_stock": 3082,
+    "no_stock_record": 21,
+    "mixed_stock": 22128,
+    "total_valid_products": 25803
+  },
+  "pricing": {
+    "mean_price": 765.7,
+    "median_price": 91.5,
+    "max_price": 169599.0,
+    "valid_discounts": 782,
+    "mean_discount_pct": 33.0,
+    "median_discount_pct": 26.4,
+    "extreme_discounts": 43,
+    "bucket_counts": {
+      "≤50": 7948,
+      "51–100": 5792,
+      "101–250": 6746,
+      "251–500": 2793,
+      "501–1000": 983,
+      ">1000": 1541
+    }
+  },
+  "taxonomy": {
+    "products_with_category": 20808,
+    "products_no_category": 5073,
+    "avg_categories_per_product": 2.4,
+    "multi_category_products": 17533,
+    "top_categories": {
+      "Grocery": 5106,
+      "Beauty & Personal Care": 3241,
+      "Households": 2954,
+      "Sweets & Snacks": 1701,
+      "Kitchenware": 1309,
+      "Suhoor Ramadan": 1228,
+      "Beverages": 1166,
+      "Cleaning Products ": 1166,
+      "Cheese, Dairy & Eggs": 1080,
+      "Hair Care": 1034
+    }
+  },
+  "brands": {
+    "total_with_brand_raw": 25881,
+    "total_usable_brand_rows": 17315,
+    "total_unique_usable_brands": 1012,
+    "usable_brand_pct": 66.9,
+    "top_brands": {
+      "Spinneys": 697,
+      "Abu Auf": 289,
+      "Elhelal": 273,
+      "Nouval": 236,
+      "Mintra": 194,
+      "Tornado": 192,
+      "Pasabahce": 168,
+      "Dettol": 157,
+      "Dove": 156,
+      "Eva": 154
+    }
+  },
+  "attributes": {
+    "Pack": {
+      "count": 0,
+      "pct": 0.0,
+      "code": "product_pack"
+    },
+    "Size / Unit": {
+      "count": 0,
+      "pct": 0.0,
+      "code": "product_size"
+    },
+    "Product Type": {
+      "count": 0,
+      "pct": 0.0,
+      "code": "product_type"
+    },
+    "Measurement Type": {
+      "count": 0,
+      "pct": 0.0,
+      "code": "product_measurement_type"
+    },
+    "Image": {
+      "count": 0,
+      "pct": 0.0,
+      "code": "product_image"
+    },
+    "Description": {
+      "count": 0,
+      "pct": 0.0,
+      "code": "product_description"
+    },
+    "English Name": {
+      "count": 25881,
+      "pct": 100.0,
+      "code": "catalog_productname"
+    }
+  },
+  "golden_queries": {
+    "total": 35,
+    "intent_counts": {
+      "Search": 10,
+      "Refine": 8,
+      "Sort": 6,
+      "Recommend": 6,
+      "Out of Scope": 5
+    },
+    "lang_counts": {
+      "EN": 23,
+      "AR": 12
+    }
+  },
+  "tables": [
+    {
+      "TABLE_NAME": "catalog_productstock",
+      "TABLE_ROWS": 600975
+    },
+    {
+      "TABLE_NAME": "catalog_productprice",
+      "TABLE_ROWS": 273244
+    },
+    {
+      "TABLE_NAME": "catalog_productdescription",
+      "TABLE_ROWS": 133036
+    },
+    {
+      "TABLE_NAME": "catalog_productname",
+      "TABLE_ROWS": 50084
+    },
+    {
+      "TABLE_NAME": "catalog_product_categories",
+      "TABLE_ROWS": 49910
+    },
+    {
+      "TABLE_NAME": "catalog_productattributes",
+      "TABLE_ROWS": 33796
+    },
+    {
+      "TABLE_NAME": "catalog_product",
+      "TABLE_ROWS": 26003
+    },
+    {
+      "TABLE_NAME": "recommendations_productembedding",
+      "TABLE_ROWS": 25141
+    },
+    {
+      "TABLE_NAME": "catalog_categoryname",
+      "TABLE_ROWS": 544
+    },
+    {
+      "TABLE_NAME": "catalog_category",
+      "TABLE_ROWS": 272
+    },
+    {
+      "TABLE_NAME": "auth_permission",
+      "TABLE_ROWS": 102
+    },
+    {
+      "TABLE_NAME": "catalog_sourcecode",
+      "TABLE_ROWS": 66
+    },
+    {
+      "TABLE_NAME": "recommendations_searches",
+      "TABLE_ROWS": 66
+    },
+    {
+      "TABLE_NAME": "django_migrations",
+      "TABLE_ROWS": 58
+    },
+    {
+      "TABLE_NAME": "django_content_type",
+      "TABLE_ROWS": 25
+    },
+    {
+      "TABLE_NAME": "recommendations_querycount",
+      "TABLE_ROWS": 16
+    },
+    {
+      "TABLE_NAME": "constance_constance",
+      "TABLE_ROWS": 2
+    },
+    {
+      "TABLE_NAME": "auth_group",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "auth_group_permissions",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "auth_user",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "auth_user_groups",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "auth_user_user_permissions",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "django_admin_log",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "django_session",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "recommendations_globalsetting",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "recommendations_keywordboosting",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "recommendations_queryembedding",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "recommendations_recommendation",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "recommendations_recommendationproduct",
+      "TABLE_ROWS": 0
+    },
+    {
+      "TABLE_NAME": "recommendations_settings",
+      "TABLE_ROWS": 0
+    }
+  ]
+}

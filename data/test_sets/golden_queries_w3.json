@@ -1,0 +1,1190 @@
+[
+  {
+    "id": "Q01",
+    "raw_text": "Show me olive oil products",
+    "language": "EN",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "olive oil",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q02",
+    "raw_text": "I want fresh milk from Juhayna",
+    "language": "EN",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "fresh milk",
+      "brand": "Juhayna",
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q03",
+    "raw_text": "Looking for Domty feta cheese under 50 EGP",
+    "language": "EN",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "feta cheese",
+      "brand": "Domty",
+      "category": null,
+      "price_min": null,
+      "price_max": 50.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "price_max", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q04",
+    "raw_text": "Find organic breakfast cereal in stock",
+    "language": "EN",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "breakfast cereal",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": true,
+      "sort": null,
+      "explicit_fields": ["in_stock", "query"],
+      "unsupported_filters": ["organic"]
+    }
+  },
+  {
+    "id": "Q05",
+    "raw_text": "Where is the Almarai greek yogurt between 30 and 60 pounds?",
+    "language": "EN",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "greek yogurt",
+      "brand": "Almarai",
+      "category": null,
+      "price_min": 30.0,
+      "price_max": 60.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "price_max", "price_min", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q06",
+    "raw_text": "Search for cheap pasta",
+    "language": "EN",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "pasta",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_asc",
+      "explicit_fields": ["query", "sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q07",
+    "raw_text": "Under 60 EGP only",
+    "language": "EN",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": 60.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["price_max"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q08",
+    "raw_text": "Only Almarai brand please",
+    "language": "EN",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": "Almarai",
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q09",
+    "raw_text": "Only show items in stock",
+    "language": "EN",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": true,
+      "sort": null,
+      "explicit_fields": ["in_stock"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q10",
+    "raw_text": "Any brand is fine, remove brand filter",
+    "language": "EN",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "cancellation",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q11",
+    "raw_text": "Price between 20 and 50 EGP",
+    "language": "EN",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": 20.0,
+      "price_max": 50.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["price_max", "price_min"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q12",
+    "raw_text": "More than 100 pounds",
+    "language": "EN",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": 100.0,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["price_min"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q13",
+    "raw_text": "Sort by lowest price",
+    "language": "EN",
+    "expected": {
+      "intent": "sort",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_asc",
+      "explicit_fields": ["sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q14",
+    "raw_text": "Show cheapest first",
+    "language": "EN",
+    "expected": {
+      "intent": "sort",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_asc",
+      "explicit_fields": ["sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q15",
+    "raw_text": "Sort by highest price",
+    "language": "EN",
+    "expected": {
+      "intent": "sort",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_desc",
+      "explicit_fields": ["sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q16",
+    "raw_text": "What do you recommend for a quick healthy breakfast?",
+    "language": "EN",
+    "expected": {
+      "intent": "recommend",
+      "follow_up_type": "new_topic",
+      "query": "breakfast",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q17",
+    "raw_text": "Suggest good coffee beans for espresso",
+    "language": "EN",
+    "expected": {
+      "intent": "recommend",
+      "follow_up_type": "new_topic",
+      "query": "coffee beans for espresso",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q18",
+    "raw_text": "What is the difference between Juhayna and Almarai milk?",
+    "language": "EN",
+    "expected": {
+      "intent": "compare",
+      "follow_up_type": "new_topic",
+      "query": "milk",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q19",
+    "raw_text": "What is a healthy alternative for white sugar?",
+    "language": "EN",
+    "expected": {
+      "intent": "alternatives",
+      "follow_up_type": "new_topic",
+      "query": "white sugar",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q20",
+    "raw_text": "What goes well with this cheese?",
+    "language": "EN",
+    "expected": {
+      "intent": "cross-sell",
+      "follow_up_type": "reference",
+      "query": "cheese",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q21",
+    "raw_text": "What is the weather like in Cairo today?",
+    "language": "EN",
+    "expected": {
+      "intent": "out-of-scope",
+      "follow_up_type": "new_topic",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": [],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q22",
+    "raw_text": "Can you book me a flight ticket to Dubai?",
+    "language": "EN",
+    "expected": {
+      "intent": "out-of-scope",
+      "follow_up_type": "new_topic",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": [],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q23",
+    "raw_text": "عايز لبن كامل الدسم",
+    "language": "AR",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "لبن كامل الدسم",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q24",
+    "raw_text": "جبنة دومتي فيتا اقل من 60 جنيه",
+    "language": "AR",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "فيتا",
+      "brand": "Domty",
+      "category": null,
+      "price_min": null,
+      "price_max": 60.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "price_max", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q25",
+    "raw_text": "فين زيت الزيتون البكر المتوفر",
+    "language": "AR",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "زيت الزيتون البكر",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": true,
+      "sort": null,
+      "explicit_fields": ["in_stock", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q26",
+    "raw_text": "عاوز مكرونة الملكة بين 15 و 35 جنيه",
+    "language": "AR",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "مكرونة",
+      "brand": "El Maleka",
+      "category": null,
+      "price_min": 15.0,
+      "price_max": 35.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "price_max", "price_min", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q27",
+    "raw_text": "عصير جهينة برتقال خالي من السكر",
+    "language": "AR",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "عصير برتقال",
+      "brand": "Juhayna",
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "query"],
+      "unsupported_filters": ["sugar-free"]
+    }
+  },
+  {
+    "id": "Q28",
+    "raw_text": "عاوز ارخص مكرونة",
+    "language": "AR",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "مكرونة",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_asc",
+      "explicit_fields": ["query", "sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q29",
+    "raw_text": "تحت 40 جنيه بس",
+    "language": "AR",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": 40.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["price_max"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q30",
+    "raw_text": "ماركة جهينة فقط",
+    "language": "AR",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": "Juhayna",
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q31",
+    "raw_text": "المتوفر فقط في الفرع",
+    "language": "AR",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": true,
+      "sort": null,
+      "explicit_fields": ["in_stock"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q32",
+    "raw_text": "اي ماركة مش فارق معايا",
+    "language": "AR",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "cancellation",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q33",
+    "raw_text": "من 50 ل 100 جنيه",
+    "language": "AR",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": 50.0,
+      "price_max": 100.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["price_max", "price_min"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q34",
+    "raw_text": "فوق 80 جنيه",
+    "language": "AR",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": 80.0,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["price_min"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q35",
+    "raw_text": "رتب من الارخص للاغلى",
+    "language": "AR",
+    "expected": {
+      "intent": "sort",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_asc",
+      "explicit_fields": ["sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q36",
+    "raw_text": "هات الارخص الاول",
+    "language": "AR",
+    "expected": {
+      "intent": "sort",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_asc",
+      "explicit_fields": ["sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q37",
+    "raw_text": "رتب بالسعر تنازلي",
+    "language": "AR",
+    "expected": {
+      "intent": "sort",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_desc",
+      "explicit_fields": ["sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q38",
+    "raw_text": "اقترح عليا سناك صحي للاطفال",
+    "language": "AR",
+    "expected": {
+      "intent": "recommend",
+      "follow_up_type": "new_topic",
+      "query": "سناك صحي للاطفال",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q39",
+    "raw_text": "ايه احسن زيت للقلي ترشحهولي",
+    "language": "AR",
+    "expected": {
+      "intent": "recommend",
+      "follow_up_type": "new_topic",
+      "query": "زيت للقلي",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q40",
+    "raw_text": "قارن بين جهينة والمراعي",
+    "language": "AR",
+    "expected": {
+      "intent": "compare",
+      "follow_up_type": "new_topic",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": [],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q41",
+    "raw_text": "ايه الفرق بين جبنة دومتي وبريزيدون",
+    "language": "AR",
+    "expected": {
+      "intent": "compare",
+      "follow_up_type": "new_topic",
+      "query": "جبنة",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q42",
+    "raw_text": "بديل لجبنة فيتا",
+    "language": "AR",
+    "expected": {
+      "intent": "alternatives",
+      "follow_up_type": "new_topic",
+      "query": "فيتا",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q43",
+    "raw_text": "ايه ينفع مع الشاي ده",
+    "language": "AR",
+    "expected": {
+      "intent": "cross-sell",
+      "follow_up_type": "reference",
+      "query": "شاي",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q44",
+    "raw_text": "الجو عامل ايه النهاردة في القاهرة",
+    "language": "AR",
+    "expected": {
+      "intent": "out-of-scope",
+      "follow_up_type": "new_topic",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": [],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q45",
+    "raw_text": "3ayez laban juhayna",
+    "language": "MIXED",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "laban",
+      "brand": "Juhayna",
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q46",
+    "raw_text": "feen el cheese almarai ta7t 50 egp",
+    "language": "MIXED",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "cheese",
+      "brand": "Almarai",
+      "category": null,
+      "price_min": null,
+      "price_max": 50.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "price_max", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q47",
+    "raw_text": "Looking for gebna domty feta",
+    "language": "MIXED",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "gebna feta",
+      "brand": "Domty",
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q48",
+    "raw_text": "hatly olive oil motawafer",
+    "language": "MIXED",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "olive oil",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": true,
+      "sort": null,
+      "explicit_fields": ["in_stock", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q49",
+    "raw_text": "3ayez zayt el doha under 100",
+    "language": "MIXED",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "zayt",
+      "brand": "El Doha",
+      "category": null,
+      "price_min": null,
+      "price_max": 100.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "price_max", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q50",
+    "raw_text": "feen el biscuits bisco misr",
+    "language": "MIXED",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "biscuits",
+      "brand": "BiscoMisr",
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand", "query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q51",
+    "raw_text": "3ayez arkhas pasta",
+    "language": "MIXED",
+    "expected": {
+      "intent": "search",
+      "follow_up_type": "new_topic",
+      "query": "pasta",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_asc",
+      "explicit_fields": ["query", "sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q52",
+    "raw_text": "ta7t 60 gneh bas",
+    "language": "MIXED",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": 60.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["price_max"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q53",
+    "raw_text": "bas brand almarai",
+    "language": "MIXED",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": "Almarai",
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q54",
+    "raw_text": "el motawafer bas",
+    "language": "MIXED",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": true,
+      "sort": null,
+      "explicit_fields": ["in_stock"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q55",
+    "raw_text": "ay brand mesh fare2",
+    "language": "MIXED",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "cancellation",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["brand"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q56",
+    "raw_text": "between 30 w 70 pounds",
+    "language": "MIXED",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": 30.0,
+      "price_max": 70.0,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["price_max", "price_min"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q57",
+    "raw_text": "fo2 80 pounds",
+    "language": "MIXED",
+    "expected": {
+      "intent": "refine",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": 80.0,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["price_min"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q58",
+    "raw_text": "rateb bel se3r el arkhas",
+    "language": "MIXED",
+    "expected": {
+      "intent": "sort",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_asc",
+      "explicit_fields": ["sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q59",
+    "raw_text": "sort by el arkhas",
+    "language": "MIXED",
+    "expected": {
+      "intent": "sort",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_asc",
+      "explicit_fields": ["sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q60",
+    "raw_text": "rateb men el aghla",
+    "language": "MIXED",
+    "expected": {
+      "intent": "sort",
+      "follow_up_type": "refinement",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": "price_desc",
+      "explicit_fields": ["sort"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q61",
+    "raw_text": "e2tra7 3alaya breakfast sari3",
+    "language": "MIXED",
+    "expected": {
+      "intent": "recommend",
+      "follow_up_type": "new_topic",
+      "query": "breakfast sari3",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q62",
+    "raw_text": "2aren ben juhayna w almarai",
+    "language": "MIXED",
+    "expected": {
+      "intent": "compare",
+      "follow_up_type": "new_topic",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": [],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q63",
+    "raw_text": "badeel le laban ba2ary",
+    "language": "MIXED",
+    "expected": {
+      "intent": "alternatives",
+      "follow_up_type": "new_topic",
+      "query": "laban ba2ary",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q64",
+    "raw_text": "eh yenfa3 ma3 el coffee da",
+    "language": "MIXED",
+    "expected": {
+      "intent": "cross-sell",
+      "follow_up_type": "reference",
+      "query": "coffee",
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": ["query"],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q65",
+    "raw_text": "el gaw 3amel eh el naharda",
+    "language": "MIXED",
+    "expected": {
+      "intent": "out-of-scope",
+      "follow_up_type": "new_topic",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": [],
+      "unsupported_filters": []
+    }
+  },
+  {
+    "id": "Q66",
+    "raw_text": "e7jezly taxi le el matar",
+    "language": "MIXED",
+    "expected": {
+      "intent": "out-of-scope",
+      "follow_up_type": "new_topic",
+      "query": null,
+      "brand": null,
+      "category": null,
+      "price_min": null,
+      "price_max": null,
+      "in_stock": null,
+      "sort": null,
+      "explicit_fields": [],
+      "unsupported_filters": []
+    }
+  }
+]
