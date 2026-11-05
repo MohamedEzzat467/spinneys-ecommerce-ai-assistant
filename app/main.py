@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import FileResponse
+from starlette.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 # ── Load .env before importing internal modules ────────────────────────────────
@@ -742,19 +742,41 @@ async def store_checkout(request: CheckoutRequest) -> dict[str, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Frontend Static Files & SPA Root Serving
+# Frontend Static Files & SPA Root Serving (Dynamic Absolute Path Resolution)
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.get("/")
-async def serve_index():
-    index_file = FRONTEND_DIR / "index.html" if (FRONTEND_DIR / "index.html").exists() else Path("frontend/index.html")
-    return FileResponse(str(index_file))
+# Resolve paths relative to project root or execution directory
+BASE_DIR = Path(__file__).resolve().parent.parent
+candidate_dirs = [
+    BASE_DIR / "frontend",
+    Path.cwd() / "frontend",
+    Path("/app/frontend"),
+    Path("frontend").resolve(),
+]
 
+RESOLVED_FRONTEND_DIR: Optional[Path] = None
+for candidate in candidate_dirs:
+    if candidate.exists() and candidate.is_dir():
+        RESOLVED_FRONTEND_DIR = candidate
+        break
 
-static_dir = str(FRONTEND_DIR if FRONTEND_DIR.exists() else Path("frontend"))
-# Mount frontend directory using StaticFiles under /static and root
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
-app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
+if RESOLVED_FRONTEND_DIR and RESOLVED_FRONTEND_DIR.exists():
+    log.info("Mounting frontend from: %s", RESOLVED_FRONTEND_DIR)
+    app.mount("/static", StaticFiles(directory=str(RESOLVED_FRONTEND_DIR)), name="static")
+    app.mount("/", StaticFiles(directory=str(RESOLVED_FRONTEND_DIR), html=True), name="frontend")
+
+    @app.get("/")
+    async def serve_index():
+        index_file = RESOLVED_FRONTEND_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+        return JSONResponse({"message": "Frontend index.html not found on disk"})
+else:
+    log.warning("Frontend directory not found among candidates: %s", candidate_dirs)
+
+    @app.get("/")
+    async def serve_root():
+        return JSONResponse({"message": "Spinneys Shopping Assistant API is running (frontend folder not found)"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
