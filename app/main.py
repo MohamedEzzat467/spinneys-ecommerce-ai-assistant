@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from typing import Optional, Any
 
@@ -28,9 +29,10 @@ load_dotenv(ROOT / ".env")
 
 from app.retrieval.vector_store import VectorStore, SearchFilters, SearchResult
 from app.retrieval.retriever import ProductRetriever
-from app.nlu.parser import ParseRequest, ParseResult, parse_query, sanitize_query
+from app.nlu.parser import ParseRequest, ParseResult, parse_query, sanitize_query, ADVISORY_RE, PRODUCT_ENTITY_RE
 from app.state.context import SessionManager, SessionState
 from app.store.service import StoreService
+from app.core.llm import get_llm_client
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -318,84 +320,180 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
     retriever = require_retriever()
 
     try:
-        # Step a: Parse user message
-        nlu = parse_query(request.message)
+        # Step 1: Retrieve Session State, Visible Products, and History
+        state = session_mgr.get_session(request.session_id)
+        visible_products = state.last_results or []
+        history = getattr(state, "history", [])
 
-        # Step b: Update session state
+        # Step 2: Invoke the LLM Central Controller
+        nlu = parse_query(
+            raw_text=request.message,
+            session_context=state.to_filters(),
+            visible_products=visible_products,
+            conversation_history=history,
+        )
+
+        # Record user turn in dialog history
+        history.append({"role": "user", "content": request.message})
+
+        # Update session state filters
         state = session_mgr.update_state(request.session_id, nlu)
         active_filters = state.to_filters()
 
-        # Step b.2: In-memory sorting for contextual follow-up sort requests
-        is_sort_request = (
-            nlu.intent == "sort"
-            or (nlu.sort is not None and not nlu.query)
-        )
-        if is_sort_request and state.last_results:
-            sort_desc = (nlu.sort == "price_desc")
-            sorted_products = sorted(
-                state.last_results,
-                key=lambda p: float(p.get("price", 0.0)),
-                reverse=sort_desc,
-            )
-            state.last_results = sorted_products
-            reply = "تم ترتيب المنتجات من الأعلى سعراً إلى الأقل:" if sort_desc else "تم ترتيب المنتجات من الأقل سعراً إلى الأعلى:"
+        # Step 3: Route based on LLM Action / Intent
+
+        # === ROUTE 0: COUNT & AGGREGATION INQUIRY ===
+        if nlu.is_count_query or nlu.action == "count_inquiry" or nlu.intent == "count_inquiry":
+            target_entity = nlu.clean_query or "فول"
+            agg = retriever.get_entity_aggregation(target_entity)
+            total_count = agg["total_count"]
+            varieties = agg["varieties"]
+            rep_products = agg["products"]
+
+            # Save representative products to session context
+            state.last_results = rep_products
+
+            var_text = "، ".join(varieties)
+            entity_label = "الفول" if "فول" in target_entity else target_entity
+            reply = f"يوجد في المتجر حوالي {total_count} أصناف من {entity_label} مقسمة إلى: ({var_text}). إليك أبرزها:"
+
+            history.append({"role": "assistant", "content": reply})
             return ChatResponse(
                 session_id=request.session_id,
                 reply=reply,
-                intent="sort",
+                intent="count_inquiry",
                 filters=active_filters,
-                products=[CatalogProductItem(**p) for p in sorted_products],
+                products=[CatalogProductItem(**p) for p in rep_products],
             )
 
-        # Step c: Execute retrieval with merged session filters
-        target_query = state.query if (nlu.intent in ("refine", "sort") and state.query) else request.message
-        retrieval_res = retriever.retrieve(
-            query=target_query,
-            limit=10,
-            mode="auto",
-            filter_overrides=active_filters,
-        )
+        # === ROUTE 1: RECIPE & COOKING INQUIRIES ===
+        if nlu.action == "recipe" or nlu.intent == "recipe":
+            target_ingredient = nlu.primary_ingredient or nlu.clean_query or "لحم"
+            retrieval_mode = "hybrid" if (retriever.hybrid_engine.vector_store and retriever.hybrid_engine.vector_store.is_ready()) else "auto"
 
-        # Check if Recipe / Smart Cart response
-        if retrieval_res.get("intent") == "recipe":
-            dish_name = retrieval_res.get("dish", target_query)
-            cart_items = retrieval_res.get("cart", [])
-            reply = f"حضرت لك قائمة المكونات لتحضير {dish_name} مع المنتجات المقترحة من سبينيس:"
+            # Retrieve real store items for the primary ingredient
+            retrieval_res = retriever.retrieve(
+                query=target_ingredient,
+                limit=nlu.limit or 5,
+                mode=retrieval_mode,
+                is_internal=True,
+            )
+            matched_products = [
+                p for p in retrieval_res.get("products", [])
+                if float(p.get("price", 0.0)) > 0.0
+            ][: (nlu.limit or 5)]
+
+            # Save real meat/ingredient products to session context
+            state.last_results = matched_products
+
+            reply = nlu.recipe_advice or (
+                f"إليك مقادير وطريقة تحضير أشهى وجبة باستخدام {target_ingredient} مع أبرز المنتجات المتاحة في المتجر:"
+            )
+            history.append({"role": "assistant", "content": reply})
+
             return ChatResponse(
                 session_id=request.session_id,
                 reply=reply,
                 intent="recipe",
                 filters=active_filters,
-                products=[],
-                dish=dish_name,
-                cart=cart_items,
+                products=[CatalogProductItem(**p) for p in matched_products],
             )
 
-        # Check if Healthy Meal Recommendation response
-        if retrieval_res.get("is_healthy_meal"):
-            dish_name = retrieval_res.get("dish", "وجبة صحية قليلة السعرات")
-            cart_items = retrieval_res.get("cart", [])
-            matched_products = retrieval_res.get("products", [])
-            state.last_results = matched_products
-            reply = retrieval_res.get("reply") or f"اقترحت لك {dish_name} متوازنة وقليلة السعرات الحرارية من منتجات سبينيس:"
+        # === ROUTE 2: CONVERSATIONAL & NUTRITIONAL Q&A ===
+        elif nlu.action == "advisory_qa" or nlu.intent == "advisory":
+            # STRICT GUARD: DO NOT execute any database, vector, or keyword search!
+            # Grounded solely in visible products from state.last_results
+            reply = nlu.conversational_reply
+            if not reply:
+                if state.last_results:
+                    titles = [p.get("name_ar") or p.get("name_en", "") for p in state.last_results[:4]]
+                    reply = f"بالمقارنة بين المنتجات المعروضة ({' و'.join(titles)})، يُعد الخيار الأول الأكثر ملاءمة لجودة المكونات والقيمة الغذائية."
+                else:
+                    reply = "يسعدني تقديم المشورة الغذائية لك! من فضلك ابحث أولاً عن المنتجات التي تود مقارنتها وسأوضح لك الفروق والقيمة الغذائية."
+
+            history.append({"role": "assistant", "content": reply})
             return ChatResponse(
                 session_id=request.session_id,
                 reply=reply,
-                intent="recommend",
+                intent="advisory",
                 filters=active_filters,
-                products=[CatalogProductItem(**p) for p in matched_products],
-                dish=dish_name,
-                cart=cart_items,
+                products=[CatalogProductItem(**p) for p in state.last_results],
             )
 
-        matched_products = retrieval_res.get("products", [])
+        # === ROUTE 3: STANDALONE SORT ===
+        elif nlu.action == "sort" or nlu.intent == "sort":
+            if state.last_results:
+                sort_desc = (nlu.sort_by == "price_desc")
+                sorted_products = sorted(
+                    state.last_results,
+                    key=lambda p: float(p.get("price", 0.0)),
+                    reverse=sort_desc,
+                )
+                state.last_results = sorted_products
+                reply = "تم ترتيب المنتجات من الأعلى سعراً إلى الأقل:" if sort_desc else "تم ترتيب المنتجات من الأقل سعراً إلى الأعلى:"
+                history.append({"role": "assistant", "content": reply})
+                return ChatResponse(
+                    session_id=request.session_id,
+                    reply=reply,
+                    intent="sort",
+                    filters=active_filters,
+                    products=[CatalogProductItem(**p) for p in sorted_products],
+                )
+
+        # === ROUTE 4: OUT OF SCOPE ===
+        elif nlu.action == "out_of_scope" or nlu.intent in ("out_of_scope", "out-of-scope"):
+            reply = nlu.conversational_reply or "أنا مساعد سبينيس الذكي للتسوق، أقدر أساعدك في البحث عن المنتجات والأسعار والوصفات في السوبرماركت."
+            history.append({"role": "assistant", "content": reply})
+            return ChatResponse(
+                session_id=request.session_id,
+                reply=reply,
+                intent="out-of-scope",
+                filters=active_filters,
+                products=[],
+            )
+
+        # === ROUTE 5: CATALOG SEARCH & REFINEMENTS ===
+        target_query = nlu.clean_query or nlu.semantic_expansion or state.query or request.message
+        req_limit = nlu.limit or 10
+
+        retrieval_mode = "hybrid" if (retriever.hybrid_engine.vector_store and retriever.hybrid_engine.vector_store.is_ready()) else "auto"
+        overrides = dict(active_filters)
+        overrides["query"] = target_query
+        if nlu.category:
+            overrides["category"] = nlu.category
+        if nlu.attribute_focus:
+            overrides["attribute_focus"] = nlu.attribute_focus
+
+        retrieval_res = retriever.retrieve(
+            query=target_query,
+            limit=max(req_limit * 3, 20),
+            mode=retrieval_mode,
+            filter_overrides=overrides,
+        )
+
+        matched_products = [
+            p for p in retrieval_res.get("products", [])
+            if float(p.get("price", 0.0)) > 0.0
+        ]
+
+        # Apply in-memory sort if requested
+        if nlu.sort_by != "relevance" and matched_products:
+            sort_desc = (nlu.sort_by == "price_desc")
+            matched_products = sorted(
+                matched_products,
+                key=lambda p: float(p.get("price", 0.0)),
+                reverse=sort_desc,
+            )
+
+        # Apply exact limit slicing
+        if req_limit and matched_products:
+            matched_products = matched_products[:req_limit]
+
         state.last_results = matched_products
         count = len(matched_products)
 
-        # Step d: Formulate natural conversational reply
-        if nlu.intent == "out-of-scope":
-            reply = "أنا مساعد سبينيس الذكي للتسوق، أقدر أساعدك في البحث عن المنتجات والأسعار والوصفات في السوبرماركت."
-        elif count == 0:
+        # Formulate clean conversational reply
+        if count == 0:
             filter_desc = []
             if state.brand:
                 filter_desc.append(f"ماركة {state.brand}")
@@ -405,21 +503,30 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
                 filter_desc.append("المتوفر فقط")
             suffix = f" مع فلاتر: {', '.join(filter_desc)}" if filter_desc else ""
             reply = f"للأسف لم أجد منتجات تطابق بحثك عن '{target_query}'{suffix}."
+        elif nlu.attribute_focus == "protein":
+            reply = "إليك أبرز المنتجات عالية البروتين المتاحة في المتجر (مثل صدور الدواجن والتونة):"
+        elif nlu.conversational_reply:
+            reply = nlu.conversational_reply
+        elif nlu.attribute_focus in ("low_fat", "low_cal", "diet"):
+            reply = "إليك أبرز المنتجات الصحية وقليلة السعرات في المتجر:"
+        elif nlu.attribute_focus == "cheap" or nlu.sort_by == "price_asc":
+            clean_item = nlu.clean_query or "منتجات تناسب طلبك"
+            reply = f"وجدت لك {count} منتجات {clean_item} مرتبة حسب السعر:"
+        elif nlu.sort_by == "price_desc":
+            clean_item = nlu.clean_query or "منتجات تناسب طلبك"
+            reply = f"وجدت لك {count} منتجات {clean_item} مرتبة من الأعلى سعراً إلى الأقل:"
         else:
-            clean_item = sanitize_query(target_query) if target_query else ""
-            item_desc = clean_item if clean_item else "تناسب طلبك"
-            reply = f"وجدت لك {count} منتجات {item_desc} متاحة في الكتالوج:"
+            clean_item = nlu.clean_query or "منتجات تناسب طلبك"
+            reply = f"وجدت لك {count} منتجات {clean_item} متاحة في الكتالوج:"
 
-        products_list = [
-            CatalogProductItem(**p) for p in matched_products
-        ]
+        history.append({"role": "assistant", "content": reply})
 
         return ChatResponse(
             session_id=request.session_id,
             reply=reply,
-            intent=nlu.intent,
+            intent="search",
             filters=active_filters,
-            products=products_list,
+            products=[CatalogProductItem(**p) for p in matched_products],
         )
     except Exception as exc:
         log.exception("Chat conversation failed for session %r: %s", request.session_id, exc)

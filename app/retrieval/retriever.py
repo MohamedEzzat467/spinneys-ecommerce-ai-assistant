@@ -52,6 +52,12 @@ NEGATION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Permanent voucher and junk purge pattern
+VOUCHER_JUNK_RE = re.compile(
+    r"\b(?:voucher|gift\s*card|coupon|card)\b|قسيمة|خصم",
+    re.IGNORECASE,
+)
+
 # Recipe intent pattern
 RECIPE_RE = re.compile(
     r"\b(طريقة عمل|طريقة تحضير|عايز اعمل|عاوز اعمل|اعمل|مكونات|مقادير|طبخ|recipe for|how to make|make|cook)\b",
@@ -92,7 +98,37 @@ NON_FOOD_CATEGORIES = {
     "stationery",
     "home & garden",
     "toys",
+    "baby care",
+    "appliances",
 }
+
+FOUL_LEGUME_STEMS = (
+    "مدمس", "تدميس", "مجروش", "حب", "حصى", "صحيح", "بلدي", "مقشور", "طعمية", "بصارة",
+    "fava", "foul", "beans", "ful", "medames", "medammes"
+)
+
+FOUL_NON_LEGUME_TERMS = (
+    "سوداني", "سودانى", "peanut", "peanuts", "صويا", "soy", "soya",
+    "اوتوماتيك", "automatic", "full hd", "اتش دي", "فل اتش دي", "فولا", "fulla",
+    "تتبيلة", "تتبيله", "بهارات", "seasoning"
+)
+
+CHEESE_STEMS = (
+    "جبن", "جبنة", "cheddar", "roumy", "feta", "mozzarella", "cheese",
+    "شيدر", "رومي", "فيتا", "موتزاريلا", "موزاريلا", "كيري", "قريش",
+    "براميلي", "اسطنبولي", "مثلثات", "ريكوتا", "حلوم", "بارميزان", "بارميجانو", "جودا", "فلمنك"
+)
+
+PROTEIN_STEMS = (
+    "صدور دجاج", "دجاج", "تونة", "تونه", "بيض", "لحم", "لحوم", "رومي",
+    "اسماك", "سمك", "فيليه", "chicken", "tuna", "turkey", "beef", "meat", "fish", "eggs"
+)
+
+PROCESSED_CHEESE_STEMS = (
+    "مطبوخ", "مطبوخة", "كريمي", "سبريد", "مثلثات", "مربعات", "شيدر سبريد",
+    "جبن خضار", "جبنة خضار", "spread", "creamy", "cream cheese", "processed",
+    "triangles", "portions"
+)
 
 
 class ProductRetriever:
@@ -144,6 +180,18 @@ class ProductRetriever:
         df["effective_price"] = df["effective_price"].astype(np.float64)
         df["default_price"] = df["default_price"].astype(np.float64)
         df["availability"] = df["availability"].astype(bool)
+
+        # Enforce permanent voucher, zero-price, and non-grocery junk purge
+        junk_mask = (
+            (df["effective_price"] <= 0.0)
+            | (df["default_price"] <= 0.0)
+            | df["name_en"].astype(str).str.contains(VOUCHER_JUNK_RE, regex=True, na=False)
+            | df["name_ar"].astype(str).str.contains(VOUCHER_JUNK_RE, regex=True, na=False)
+            | df["category"].astype(str).str.contains(VOUCHER_JUNK_RE, regex=True, na=False)
+        )
+        purged_count = int(junk_mask.sum())
+        df = df[~junk_mask].copy().reset_index(drop=True)
+        log.info("Purged %d zero-price, voucher, and junk items from catalog.", purged_count)
 
         # Precompute sweetener/sugar substitute mask for rapid negative filtering
         df["_is_sweetener"] = (
@@ -349,7 +397,7 @@ class ProductRetriever:
         max_price = filters.get("max_price")
         in_stock = filters.get("in_stock")
         sort_order = filters.get("sort")
-        keyword = filters.get("query")
+        keyword = filters.get("query") or query
         if keyword:
             keyword = sanitize_query(keyword)
 
@@ -378,16 +426,36 @@ class ProductRetriever:
             if ex_set:
                 mask &= (~df["_brand_lower"].isin(ex_set))
 
-        # 3. Category filter
+        # 3. Category filter (supports comma-separated multi-category like 'dairy,canned food,poultry,legumes')
         if category:
-            cat_norm = category.strip().lower()
-            mask &= (df["_category_lower"] == cat_norm) | (df["_category_lower"].str.startswith(cat_norm))
+            cat_tokens = [c.strip().lower() for c in re.split(r"[,/|]", category) if c.strip()]
+            if cat_tokens:
+                cat_mask = np.zeros(len(df), dtype=bool)
+                for cat_norm in cat_tokens:
+                    cat_mask |= (
+                        (df["_category_lower"] == cat_norm)
+                        | (df["_category_lower"].str.startswith(cat_norm))
+                        | (df["_category_lower"].str.contains(cat_norm, regex=False, na=False))
+                    )
+                # If category was broad nutritional target, also include 'grocery' (where tuna/foul/eggs live)
+                if any(k in category.lower() for k in ["legumes", "canned food", "poultry", "dairy"]):
+                    cat_mask |= (df["_category_lower"] == "grocery")
+                mask &= cat_mask
 
         # 4. Price filters
         if max_price is not None:
             mask &= (df["effective_price"] <= float(max_price))
         if min_price is not None:
             mask &= (df["effective_price"] >= float(min_price))
+        else:
+            # Enforce minimum price threshold (>= 2.00 EGP) for adult nutrition / grocery queries to prevent herbs/parsley garnish
+            is_nutrition_search = (
+                bool(filters.get("attribute_focus"))
+                or any(w in norm_q.lower() for w in ["بروتين", "دايت", "سعرات", "طاقة", "دهون", "تونة", "دجاج", "بيض", "شوفان"])
+                or (bool(keyword) and any(w in keyword.lower() for w in ["بروتين", "دايت", "سعرات", "طاقة", "دهون", "تونة", "دجاج", "بيض", "شوفان"]))
+            )
+            if is_nutrition_search:
+                mask &= (df["effective_price"] >= 2.00)
 
         # 5. In-stock filter
         if in_stock is True:
@@ -401,9 +469,30 @@ class ProductRetriever:
         if is_diet_or_healthy and not is_explicit_sweetener and "_is_sweetener" in df.columns:
             mask &= (~df["_is_sweetener"])
 
-        # 7. Exclude non-food categories for food/dairy queries
+        # 7. Exclude non-food categories for food, dairy, and nutrition queries
         is_dairy_query = bool(DAIRY_TERMS_RE.search(norm_q)) or (bool(keyword) and bool(DAIRY_TERMS_RE.search(keyword)))
-        if is_dairy_query:
+        is_cheese_query = any(k in norm_q.lower() for k in ("جبن", "جبنة", "cheese")) or (bool(keyword) and any(k in keyword.lower() for k in ("جبن", "جبنة", "cheese")))
+        is_milk_query = any(k in norm_q.lower() for k in ("لبن", "حليب", "milk")) or (bool(keyword) and any(k in keyword.lower() for k in ("لبن", "حليب", "milk")))
+        is_protein_query = (
+            filters.get("attribute_focus") == "protein"
+            or any(w in norm_q.lower() for w in ["بروتين", "البروتين", "protein"])
+            or any(w in keyword.lower() for w in ["تونة صدور دجاج", "بروتين", "protein"])
+        )
+        is_foul_query = (
+            bool(re.search(r"\b(فول|الفول|foul|ful|fava)\b", norm_q, re.IGNORECASE))
+            or (bool(keyword) and bool(re.search(r"\b(فول|الفول|foul|ful|fava)\b", keyword, re.IGNORECASE)))
+        )
+        is_explicit_peanut = (
+            any(w in norm_q.lower() for w in ("سودان", "سوداني", "سودانى", "peanut"))
+            or (bool(keyword) and any(w in keyword.lower() for w in ("سودان", "سوداني", "سودانى", "peanut")))
+        )
+        is_explicit_soy = (
+            any(w in norm_q.lower() for w in ("صويا", "soy", "soya"))
+            or (bool(keyword) and any(w in keyword.lower() for w in ("صويا", "soy", "soya")))
+        )
+
+        is_nutrition_query = bool(filters.get("attribute_focus")) or any(w in norm_q.lower() for w in ["بروتين", "دايت", "سعرات", "طاقة", "دهون", "تونة", "دجاج", "بيض", "شوفان"])
+        if is_dairy_query or is_nutrition_query or (is_foul_query and not is_explicit_peanut and not is_explicit_soy):
             mask &= (~df["_category_lower"].isin(NON_FOOD_CATEGORIES))
 
         candidate_df = df[mask]
@@ -424,6 +513,37 @@ class ProductRetriever:
         # Step 3: Candidate Ranking
         ranked_product_ids: list[int] = []
 
+        def _calc_item_bonus(p_rec: Optional[dict[str, Any]], p_name: str, p_cat: str) -> float:
+            extra = 0.0
+            if is_foul_query and not is_explicit_peanut and not is_explicit_soy:
+                p_nar = normalize_text(str(p_rec.get("name_ar", ""))) if p_rec else ""
+                p_nen = str(p_rec.get("name_en", "")).lower() if p_rec else ""
+                p_words_ar = set(p_nar.split())
+                p_words_en = set(p_nen.split())
+                has_foul_token = bool(p_words_ar & {"فول", "الفول"}) or bool(p_words_en & {"foul", "ful", "fava"})
+                if not has_foul_token:
+                    extra -= 50.0
+                elif any(term in p_name for term in FOUL_NON_LEGUME_TERMS):
+                    extra -= 30.0
+                elif any(stem in p_name for stem in FOUL_LEGUME_STEMS):
+                    extra += 20.0
+            elif is_cheese_query:
+                if any(stem in p_name for stem in CHEESE_STEMS):
+                    extra += 10.0
+                else:
+                    extra -= 10.0
+            elif is_protein_query:
+                if any(stem in p_name for stem in PROCESSED_CHEESE_STEMS):
+                    extra -= 20.0
+                elif any(k in p_cat for k in ("meat", "poultry", "seafood", "canned seafood", "tuna", "fish", "eggs")) or any(stem in p_name for stem in PROTEIN_STEMS):
+                    extra += 10.0
+            elif is_dairy_query:
+                if any(k in p_cat for k in ("dairy", "cheese", "beverage")):
+                    extra += 3.0
+                if is_milk_query and any(k in p_name for k in ("لبن", "حليب", "milk")):
+                    extra += 5.0
+            return extra
+
         if keyword and keyword.strip():
             # If diet/healthy query and auto mode, prioritize hybrid search when vector store is ready
             active_mode = mode
@@ -442,7 +562,9 @@ class ProductRetriever:
                     for pid, score in vector_results:
                         p_rec = self.products_by_id.get(pid)
                         avail = p_rec["availability"] if p_rec else False
-                        final_score = score + (0.5 if avail else 0.0)
+                        p_name = (str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower() if p_rec else ""
+                        p_cat = str(p_rec.get("category", "")).lower() if p_rec else ""
+                        final_score = score + (0.5 if avail else 0.0) + _calc_item_bonus(p_rec, p_name, p_cat)
                         scored_candidates.append((pid, final_score))
                     scored_candidates.sort(key=lambda x: x[1], reverse=True)
                     ranked_product_ids = [pid for pid, _ in scored_candidates]
@@ -458,7 +580,9 @@ class ProductRetriever:
                     for pid, score in hybrid_results:
                         p_rec = self.products_by_id.get(pid)
                         avail = p_rec["availability"] if p_rec else False
-                        final_score = score + (0.01 if avail else 0.0)
+                        p_name = (str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower() if p_rec else ""
+                        p_cat = str(p_rec.get("category", "")).lower() if p_rec else ""
+                        final_score = score + (0.01 if avail else 0.0) + _calc_item_bonus(p_rec, p_name, p_cat)
                         scored_candidates.append((pid, final_score))
                     scored_candidates.sort(key=lambda x: x[1], reverse=True)
                     ranked_product_ids = [pid for pid, _ in scored_candidates]
@@ -477,15 +601,8 @@ class ProductRetriever:
                         avail = p_rec["availability"] if p_rec else False
                         p_name = (str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower() if p_rec else ""
                         p_cat = str(p_rec.get("category", "")).lower() if p_rec else ""
-
                         bonus = 2.0 if avail else 0.0
-                        if is_dairy_query:
-                            if any(k in p_cat for k in ("dairy", "cheese", "beverage")):
-                                bonus += 3.0
-                            if any(k in p_name for k in ("لبن", "حليب", "milk")):
-                                bonus += 5.0
-
-                        final_score = score + bonus
+                        final_score = score + bonus + _calc_item_bonus(p_rec, p_name, p_cat)
                         scored_candidates.append((pid, final_score))
 
                     scored_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -527,7 +644,7 @@ class ProductRetriever:
         final_products = []
         for pid in selected_ids:
             rec = self.products_by_id.get(pid)
-            if rec:
+            if rec and float(rec.get("effective_price", 0.0)) > 0.0:
                 final_products.append(
                     {
                         "product_id": int(rec["product_id"]),
@@ -568,3 +685,134 @@ class ProductRetriever:
             "applied_filters": applied,
             "products": final_products,
         }
+
+    def get_entity_aggregation(self, entity: str) -> dict[str, Any]:
+        """
+        Calculates catalog aggregation for count and variety inquiries (e.g. 'كم نوع فول موجود').
+        Returns total count of matching products, variety breakdown, and representative products.
+        """
+        norm_entity = normalize_text(entity).strip().lower()
+        df = self.df_meta
+        if df.empty:
+            return {
+                "entity": entity,
+                "total_count": 0,
+                "varieties": [],
+                "products": [],
+            }
+
+        # Filter out 0 price and non-food categories
+        valid_mask = (df["effective_price"] > 0) & (~df["_category_lower"].isin(NON_FOOD_CATEGORIES))
+        candidate_df = df[valid_mask]
+
+        is_foul = bool(re.search(r"\b(فول|الفول|foul|ful|fava)\b", norm_entity, re.IGNORECASE))
+
+        if is_foul:
+            def match_foul_item(row) -> bool:
+                nar = normalize_text(str(row.get("name_ar", "")))
+                nen = str(row.get("name_en", "")).lower()
+                full_text = f"{nar} {nen}"
+                raw_ar = str(row.get("name_ar", "")).lower()
+                if any(term in full_text or term in raw_ar for term in FOUL_NON_LEGUME_TERMS):
+                    return False
+                words_ar = set(nar.split())
+                words_en = set(nen.split())
+                return bool(words_ar & {"فول", "الفول"}) or bool(words_en & {"foul", "ful", "fava"})
+
+            matched_df = candidate_df[candidate_df.apply(match_foul_item, axis=1)]
+            total_count = len(matched_df)
+
+            varieties = [
+                "فول مدمس معلب",
+                "فول تدميس حب",
+                "فول مجروش",
+            ]
+
+            # Representative products: select top in-stock products across categories
+            canned_rows = matched_df[
+                matched_df["name_ar"].str.contains(r"مدمس|خلط|سادة|طحين|صلص|كمون|زيت", regex=True, na=False)
+                | matched_df["name_en"].str.contains(r"fava|medames|plain", case=False, na=False)
+            ].sort_values(by=["availability", "effective_price"], ascending=[False, True])
+
+            raw_rows = matched_df[
+                matched_df["name_ar"].str.contains(r"تدميس|حب|حصى|صحيح|بلدي", regex=True, na=False)
+                | matched_df["name_en"].str.contains(r"whole|raw", case=False, na=False)
+            ].sort_values(by=["availability", "effective_price"], ascending=[False, True])
+
+            split_rows = matched_df[
+                matched_df["name_ar"].str.contains(r"مجروش|طعمي|بصار", regex=True, na=False)
+                | matched_df["name_en"].str.contains(r"split", case=False, na=False)
+            ].sort_values(by=["availability", "effective_price"], ascending=[False, True])
+
+            selected_pids = []
+            for sub_df, count in [(canned_rows, 3), (raw_rows, 2), (split_rows, 2)]:
+                for pid in sub_df["product_id"].to_list()[:count]:
+                    if pid not in selected_pids:
+                        selected_pids.append(pid)
+
+            # If still need more to make ~6-8 items
+            for pid in matched_df.sort_values(by=["availability", "effective_price"], ascending=[False, True])["product_id"].to_list():
+                if len(selected_pids) >= 6:
+                    break
+                if pid not in selected_pids:
+                    selected_pids.append(pid)
+
+            products = []
+            for pid in selected_pids:
+                rec = self.products_by_id.get(pid)
+                if rec:
+                    products.append(
+                        {
+                            "product_id": int(rec["product_id"]),
+                            "name_ar": str(rec["name_ar"]),
+                            "name_en": str(rec["name_en"]),
+                            "brand": str(rec["brand"]),
+                            "price": float(rec["effective_price"]),
+                            "regular_price": float(rec["default_price"]),
+                            "has_discount": bool(rec["has_discount"]),
+                            "availability": bool(rec["availability"]),
+                            "image_url": str(rec["image_url"]),
+                        }
+                    )
+
+            return {
+                "entity": "فول",
+                "total_count": total_count,
+                "varieties": varieties,
+                "products": products,
+            }
+        else:
+            # Generic entity aggregation
+            target_kw = norm_entity
+            def match_generic(row) -> bool:
+                nar = normalize_text(str(row.get("name_ar", "")))
+                nen = str(row.get("name_en", "")).lower()
+                return target_kw in nar or target_kw in nen
+
+            matched_df = candidate_df[candidate_df.apply(match_generic, axis=1)]
+            total_count = len(matched_df)
+            sorted_items = matched_df.sort_values(by=["availability", "effective_price"], ascending=[False, True])
+            selected_pids = sorted_items["product_id"].to_list()[:6]
+            products = []
+            for pid in selected_pids:
+                rec = self.products_by_id.get(pid)
+                if rec:
+                    products.append(
+                        {
+                            "product_id": int(rec["product_id"]),
+                            "name_ar": str(rec["name_ar"]),
+                            "name_en": str(rec["name_en"]),
+                            "brand": str(rec["brand"]),
+                            "price": float(rec["effective_price"]),
+                            "regular_price": float(rec["default_price"]),
+                            "has_discount": bool(rec["has_discount"]),
+                            "availability": bool(rec["availability"]),
+                            "image_url": str(rec["image_url"]),
+                        }
+                    )
+            return {
+                "entity": entity,
+                "total_count": total_count,
+                "varieties": [entity],
+                "products": products,
+            }

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -170,13 +171,21 @@ class VectorStore:
         document: str,
         metadata: dict,
         distance: float,
-    ) -> SearchResult:
+    ) -> Optional[SearchResult]:
+        price = float(metadata.get("price", 0.0))
+        if price <= 0.0:
+            return None
+        name = str(metadata.get("product_name", ""))
+        cat = str(metadata.get("category", ""))
+        if any(term in name.lower() or term in cat.lower() for term in ["voucher", "gift card", "coupon", "قسيمة", "خصم"]) or re.search(r"\bcard\b", name.lower()) or re.search(r"\bcard\b", cat.lower()):
+            return None
+
         return SearchResult(
             product_id=id_,
-            product_name=metadata.get("product_name", ""),
+            product_name=name,
             brand=metadata.get("brand", ""),
-            category=metadata.get("category", ""),
-            price=float(metadata.get("price", 0.0)),
+            category=cat,
+            price=price,
             in_stock=bool(metadata.get("in_stock", 0)),
             distance=distance,
             document=document,
@@ -236,7 +245,9 @@ class VectorStore:
         dists = raw["distances"][0]
 
         for id_, doc, meta, dist in zip(ids, docs, metas, dists):
-            results.append(self._parse_result(id_, doc, meta, dist))
+            parsed = self._parse_result(id_, doc, meta, dist)
+            if parsed is not None:
+                results.append(parsed)
 
         log.debug("  → %d results returned", len(results))
         return results

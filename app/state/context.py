@@ -35,6 +35,7 @@ class SessionState:
     sort: Optional[str] = None
     unsupported_filters: list[str] = field(default_factory=list)
     last_results: list[dict[str, Any]] = field(default_factory=list)
+    history: list[dict[str, str]] = field(default_factory=list)
     turn_count: int = 0
 
     @property
@@ -103,10 +104,15 @@ class SessionManager:
         follow_up = getattr(nlu_result, "follow_up_type", "new_topic")
         intent = getattr(nlu_result, "intent", "search")
 
+        if intent == "advisory":
+            # Retain all active constraints and product list for advisory dialogue
+            return state
+
         if follow_up == "new_topic":
             state.reset()
-            if getattr(nlu_result, "query", None):
-                state.query = nlu_result.query
+            q_val = getattr(nlu_result, "clean_query", None) or getattr(nlu_result, "query", None)
+            if q_val:
+                state.query = q_val
             if getattr(nlu_result, "brand", None):
                 state.brand = nlu_result.brand
             if getattr(nlu_result, "category", None):
@@ -117,15 +123,19 @@ class SessionManager:
                 state.price_max = nlu_result.price_max
             if getattr(nlu_result, "in_stock", None) is not None:
                 state.in_stock = nlu_result.in_stock
-            if getattr(nlu_result, "sort", None):
-                state.sort = nlu_result.sort
+            s_val = getattr(nlu_result, "sort", None)
+            if not s_val and getattr(nlu_result, "sort_by", "relevance") != "relevance":
+                s_val = nlu_result.sort_by
+            if s_val:
+                state.sort = s_val
             if getattr(nlu_result, "unsupported_filters", None):
                 state.unsupported_filters = list(nlu_result.unsupported_filters)
 
         elif follow_up == "refinement":
             # Keep previous query if no new query specified
-            if getattr(nlu_result, "query", None):
-                state.query = nlu_result.query
+            q_val = getattr(nlu_result, "clean_query", None) or getattr(nlu_result, "query", None)
+            if q_val:
+                state.query = q_val
 
             # Update constraints if explicitly mentioned in this turn
             if getattr(nlu_result, "brand", None):
@@ -138,8 +148,11 @@ class SessionManager:
                 state.price_max = nlu_result.price_max
             if getattr(nlu_result, "in_stock", None) is not None:
                 state.in_stock = nlu_result.in_stock
-            if getattr(nlu_result, "sort", None):
-                state.sort = nlu_result.sort
+            s_val = getattr(nlu_result, "sort", None)
+            if not s_val and getattr(nlu_result, "sort_by", "relevance") != "relevance":
+                s_val = nlu_result.sort_by
+            if s_val:
+                state.sort = s_val
             if getattr(nlu_result, "unsupported_filters", None):
                 # Union unsupported filters
                 for item in nlu_result.unsupported_filters:

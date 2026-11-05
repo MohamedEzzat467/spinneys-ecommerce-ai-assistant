@@ -81,6 +81,18 @@ CURATED_RECIPES: dict[str, list[dict[str, str]]] = {
         {"ingredient": "شوفان كامل الحبة (ألياف صحية مشبعة)", "query": "شوفان", "category": "Breakfast Cereals"},
         {"ingredient": "خضار مشكل مجهز (فيتامينات وسعرات منخفضة)", "query": "خضار مشكل", "category": "Vegetables"},
     ],
+    "لحمة": [
+        {"ingredient": "لحم بقري بلدي", "query": "لحم بقري", "category": "Meat"},
+        {"ingredient": "بصل أحمر طازج", "query": "بصل", "category": "Vegetables"},
+        {"ingredient": "سمنة بلدي", "query": "سمنة", "category": "Dairy"},
+        {"ingredient": "بهارات لحمة", "query": "بهارات", "category": "Spices"},
+    ],
+    "كباب حلة": [
+        {"ingredient": "لحم سن بقري بلدي", "query": "لحم بقري", "category": "Meat"},
+        {"ingredient": "بصل أحمر طازج", "query": "بصل", "category": "Vegetables"},
+        {"ingredient": "سمنة بلدي", "query": "سمنة", "category": "Dairy"},
+        {"ingredient": "بهارات لحمة", "query": "بهارات", "category": "Spices"},
+    ],
     "pancakes": [
         {"ingredient": "Flour", "query": "flour", "category": "Baking"},
         {"ingredient": "Milk", "query": "milk", "category": "Milk"},
@@ -117,14 +129,20 @@ class RecipeEngine:
             return "وجبة صحية قليلة السعرات"
 
         patterns = [
-            r"(?:طريقة عمل|طريقة تحضير|عايز اعمل|عاوز اعمل|مكونات|مقادير|recipe for|how to make|make|cook)\s+(.+)",
+            r"(?:طريقة عمل|طريقة تحضير|عايز اعمل|عاوز اعمل|وصفة لـ?|وصفه لـ?|وصفات|مكونات|مقادير|recipe for|how to make|make|cook)\s+(.+)",
         ]
         for p in patterns:
             m = re.search(p, norm, re.IGNORECASE)
             if m:
                 dish = m.group(1).strip()
-                # Remove filler words
+                # Remove filler words and handle prepositions like 'للحمة' -> 'لحمة'
                 dish = re.sub(r"\b(من فضلك|لو سمحت|please)\b", "", dish, flags=re.IGNORECASE).strip()
+                if dish.startswith("للحم"):
+                    dish = "لحم" + dish[4:]
+                elif dish.startswith("لل"):
+                    dish = dish[2:]
+                elif dish.startswith("لـ"):
+                    dish = dish[2:]
                 return dish
         return norm
 

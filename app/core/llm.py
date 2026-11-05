@@ -55,6 +55,7 @@ class GroqClient:
         self.api_key = api_key or os.getenv("GROQ_API_KEY", "").strip()
         self.default_model = default_model or DEFAULT_MODEL
         self._client = None
+        self._working_model: Optional[str] = None
 
         if self.api_key:
             try:
@@ -84,18 +85,43 @@ class GroqClient:
             raise RuntimeError("Groq client is not available (missing GROQ_API_KEY).")
 
         import time
-        model_name = model or self.default_model
+        model_name = model or self._working_model or self.default_model
         t0 = time.perf_counter()
 
-        response = self._client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=temperature,
-            response_format={"type": "json_object"},
-        )
+        models_to_try = []
+        if self._working_model and self._working_model not in models_to_try:
+            models_to_try.append(self._working_model)
+        for cand in [model_name, "llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]:
+            if cand and cand not in models_to_try:
+                models_to_try.append(cand)
+
+        last_err = None
+        response = None
+        used_model = model_name
+
+        for m in models_to_try:
+            try:
+                response = self._client.chat.completions.create(
+                    model=m,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=temperature,
+                    response_format={"type": "json_object"},
+                )
+                used_model = m
+                self._working_model = m
+                break
+            except Exception as e:
+                last_err = e
+                err_str = str(e).lower()
+                if "model_not_found" in err_str or "does not exist" in err_str or "404" in err_str or "decommissioned" in err_str or "429" in err_str or "rate_limit" in err_str:
+                    continue
+                raise e
+
+        if response is None:
+            raise last_err
 
         latency = (time.perf_counter() - t0) * 1000.0
 
@@ -115,10 +141,56 @@ class GroqClient:
         return LLMResponse(
             content=parsed,
             raw_response=raw_text,
-            model=model_name,
+            model=used_model,
             usage=usage,
             latency_ms=latency,
         )
+
+    def complete_text(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        model: Optional[str] = None,
+        temperature: float = 0.3,
+        max_tokens: int = 500,
+    ) -> str:
+        """
+        Execute chat completion returning natural conversational text output.
+        """
+        if not self.is_available:
+            raise RuntimeError("Groq client is not available (missing GROQ_API_KEY).")
+
+        model_name = model or self._working_model or self.default_model
+
+        models_to_try = []
+        if self._working_model and self._working_model not in models_to_try:
+            models_to_try.append(self._working_model)
+        for cand in [model_name, "llama-3.1-8b-instant", "llama-3.3-70b-versatile", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]:
+            if cand and cand not in models_to_try:
+                models_to_try.append(cand)
+
+        last_err = None
+        for m in models_to_try:
+            try:
+                response = self._client.chat.completions.create(
+                    model=m,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                self._working_model = m
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                last_err = e
+                err_str = str(e).lower()
+                if "model_not_found" in err_str or "does not exist" in err_str or "404" in err_str or "decommissioned" in err_str or "429" in err_str or "rate_limit" in err_str:
+                    continue
+                raise e
+
+        raise last_err
 
 
 # Global singleton instance

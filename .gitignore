@@ -51,9 +51,12 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
-# Vector Database (Local binary files / embeddings cache)
+# Vector Database & Heavy Local Data
 data/vectordb/
 .chroma/
+*.parquet
+*.db
+*.sqlite3
 
 # Logs & Temporary Files
 logs/

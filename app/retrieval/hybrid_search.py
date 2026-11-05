@@ -80,7 +80,13 @@ class HybridSearchEngine:
 
         t0 = time.perf_counter()
         log.info("Loading documents from %s ...", self.docs_path)
-        self.df_docs = pd.read_parquet(self.docs_path)
+        df_docs = pd.read_parquet(self.docs_path)
+
+        # Enforce permanent voucher and junk purge from BM25 corpus
+        voucher_junk_re = re.compile(r"\b(?:voucher|gift\s*card|coupon|card)\b|قسيمة|خصم", re.IGNORECASE)
+        junk_mask = df_docs["normalized_doc_text"].astype(str).str.contains(voucher_junk_re, regex=True, na=False)
+        self.df_docs = df_docs[~junk_mask].copy().reset_index(drop=True)
+
         self.product_ids = self.df_docs["product_id"].to_numpy(dtype=np.int64)
         self.id_to_idx = {int(pid): idx for idx, pid in enumerate(self.product_ids)}
 

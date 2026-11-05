@@ -21,11 +21,14 @@ Implements the official Week 3 specification:
 
 from __future__ import annotations
 
+import logging
 import re
 import time
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+log = logging.getLogger("spinneys.nlu")
+
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.llm import get_llm_client
 from app.core.normalizer import (
@@ -64,22 +67,97 @@ class ParseRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=1000, examples=["عايز لبن جهينة تحت 50 جنيه"])
 
 
-class ParseResult(BaseModel):
-    raw_text: str
-    normalized_text: str
-    intent: str
-    follow_up_type: str
+class NLUResult(BaseModel):
+    """
+    Unified Structured NLU Result Schema.
+    Strictly conforms to:
+      - intent: search | sort | advisory | out_of_scope
+      - clean_query: string | null (clean product entity only)
+      - semantic_expansion: string | null (expanded keywords for attributes/nutrients)
+      - limit: int (extracted item count, default: 10)
+      - sort_by: price_asc | price_desc | relevance
+      - attribute_focus: string | null (e.g. protein, low_fat, sugar_free, organic, cheap, bulk)
+    """
+    action: Literal["search", "recipe", "advisory_qa", "count_inquiry", "sort", "out_of_scope"] = "search"
+    intent: Literal["search", "sort", "advisory", "filter", "out_of_scope", "recipe", "count_inquiry"] = "search"
+    is_count_query: bool = False
+    clean_query: Optional[str] = None
+    primary_ingredient: Optional[str] = None
+    recipe_advice: Optional[str] = None
+    conversational_reply: Optional[str] = None
+    semantic_expansion: Optional[str] = None
+    limit: Optional[int] = 10
+    sort_by: Literal["price_asc", "price_desc", "relevance"] = "relevance"
+    attribute_focus: Optional[str] = None
+    category: Optional[str] = None
+    price_max: Optional[float] = None
+    price_min: Optional[float] = None
+    is_followup: bool = False
+    advisory_topic: Optional[str] = None
+
+    # Backward compatibility attributes & aliases
     query: Optional[str] = None
     brand: Optional[str] = None
-    category: Optional[str] = None
-    price_min: Optional[float] = None
-    price_max: Optional[float] = None
     in_stock: Optional[bool] = None
     sort: Optional[str] = None
+    follow_up_type: str = "new_topic"
+    raw_text: str = ""
+    normalized_text: str = ""
     explicit_fields: list[str] = Field(default_factory=list)
     unsupported_filters: list[str] = Field(default_factory=list)
     latency_ms: float = 0.0
     token_usage: Optional[dict[str, int]] = None
+
+    @model_validator(mode="after")
+    def sync_compatibility_fields(self) -> NLUResult:
+        # Clamp limit
+        if self.limit is None or self.limit <= 0:
+            self.limit = 10
+        else:
+            self.limit = max(1, min(int(self.limit), 50))
+
+        # Sync clean_query <-> query
+        if self.clean_query and not self.query:
+            self.query = self.clean_query
+        elif self.query and not self.clean_query:
+            self.clean_query = self.query
+
+        # Sync sort_by <-> sort
+        if self.sort_by != "relevance" and not self.sort:
+            self.sort = self.sort_by
+        elif self.sort and self.sort_by == "relevance":
+            if self.sort in ("price_asc", "price_desc"):
+                self.sort_by = self.sort
+
+        # Sync is_followup <-> follow_up_type
+        if self.is_followup and self.follow_up_type == "new_topic":
+            self.follow_up_type = "refinement"
+        elif self.follow_up_type in ("refinement", "cancellation", "reference") and not self.is_followup:
+            self.is_followup = True
+
+        # Sync action <-> intent
+        if self.action == "recipe":
+            self.intent = "recipe"
+        elif self.action == "advisory_qa":
+            self.intent = "advisory"
+        elif self.action == "count_inquiry" or self.is_count_query:
+            self.action = "count_inquiry"
+            self.intent = "count_inquiry"
+            self.is_count_query = True
+        elif self.action == "sort":
+            self.intent = "sort"
+        elif self.action == "out_of_scope":
+            self.intent = "out_of_scope"
+
+        # Sync intent aliases if needed
+        if str(self.intent) == "out-of-scope":
+            self.intent = "out_of_scope"
+
+        return self
+
+
+# Backward-compatible alias
+ParseResult = NLUResult
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,6 +186,42 @@ BRAND_CANCELLATION_RE = re.compile(
 REFERENCE_RE = re.compile(
     r"\b(اول (واحد|منتج)|ثاني (واحد|منتج)|الاول|التاني|الارخص فيهم|الاخير|رقم (واحد|١|1)|"
     r"first (one|item|product)|second (one|item)|last one|cheapest of them|the first|this|that|ده|دي|دا|da|di)\b",
+    re.IGNORECASE,
+)
+
+# Advisory / Comparison / Nutritional triggers
+ADVISORY_RE = re.compile(
+    r"\b("
+    r"ايهم\s*(?:افضل|أفضل|احسن|أحسن|اعلى|أعلى|اقل|أقل|صحي|فيها|فيهم|منهم)|"
+    r"ايهما\s*(?:افضل|أفضل|احسن|أحسن|اعلى|أعلى|اقل|أقل|صحي|فيها|فيهم|منهم)|"
+    r"مين\s*(?:فيهم|منهم)?\s*(?:افضل|أفضل|احسن|أحسن|اعلى|أعلى|صحي)|"
+    r"انهي\s*(?:فيهم|منهم|واحد)?\s*(?:افضل|أفضل|احسن|أحسن|صحي\s*اكتر|احسن\s*للصحة|اعلى|أعلى)|"
+    r"مين\s*احسن|مين\s*افضل|مين\s*اعلى|"
+    r"الفرق\s*(?:بينهم|ما\s*بينهم|بين\s*(?:الانواع|الأنواع|المنتجات)\s*دي)|"
+    r"ما\s*الفرق\s*بينهم|ايه\s*الفرق\s*بينهم|"
+    r"انصحني\s*(?:بينهم|فيهم)|ترشحلي\s*انهي|ترشح\s*انهي|انهي\s*واحد|"
+    r"قارن\s*(?:بينهم|ما\s*بينهم)|"
+    r"which\s*one\s*(?:is\s*better|to\s*buy|is\s*healthier|higher\s*in\s*protein|has\s*more\s*protein)|"
+    r"difference\s*between\s*them|compare\s*them"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Known product entities (grocery items/categories)
+PRODUCT_ENTITY_RE = re.compile(
+    r"\b("
+    r"جبن[هة]?|حليب|لبن(?:\s*بودر[هة])?|زباد[يى]|قشط[هة]|سمن[هة]|زبد[هة]|بيض|"
+    r"زيت(?:\s*زيتون|\s*ذرة|\s*عباد)?|خل|"
+    r"شاي|قهو[هة]|نسكافيه|سكر|عسل|مرب[يى]|شوكولات[هة]|بسكويت|شيبس|"
+    r"ارز|أرز|رز|مكرون[هة]|صلص[هة]|تونا?|فول|عدس|حمص|لوبيا|فاصوليا|"
+    r"دجاج|فراخ|لحم[هة]|سمك|جمبري|"
+    r"منظف\w*|صابون|مسحوق|شامبو|معجون|مناديل|"
+    r"مياه|عصير|مشروب|بيبسي|كولا|"
+    r"cheese|milk|yogurt|butter|ghee|eggs|"
+    r"oil|olive\s*oil|tea|coffee|sugar|honey|"
+    r"rice|pasta|tuna|chicken|meat|beef|fish|"
+    r"soap|shampoo|juice|water"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -146,21 +260,25 @@ RECOMMEND_RE = re.compile(
 # Sort triggers
 SORT_DESC_RE = re.compile(
     r"\b("
-    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاعلى\s*سعرا?\s*(?:الى|الي|لـ?)\s*الاقل|"
-    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأعلى\s*سعراً?\s*(?:الى|الي|لـ?)\s*الأقل|"
-    r"من\s*الاعلى\s*سعرا?\s*(?:الى|الي|لـ?)\s*الاقل|"
-    r"من\s*الأعلى\s*سعراً?\s*(?:الى|الي|لـ?)\s*الأقل|"
-    r"من\s*الاعلى\s*(?:الى|الي|لـ?)\s*الاقل|"
-    r"من\s*الأعلى\s*(?:الى|الي|لـ?)\s*الأقل|"
+    r"(?:مع\s*)?ترتيب\s*(?:هم|هن|ها)?\s*تنازلي|"
+    r"مرتب(?:ين|ة|ات)?\s*تنازلي|"
+    r"مرتب(?:ين|ة|ات)?\s*من\s*(?:الاعلى|الأعلى|الاغلى|الأغلى)|"
+    r"مترتب(?:ين|ة|ات)?\s*من\s*(?:الاعلى|الأعلى|الاغلى|الأغلى)|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاعلى\s*سعرا?\s*(?:(?:الى|الي|لـ?)\s*الاقل|للاقل)|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأعلى\s*سعراً?\s*(?:(?:الى|الي|لـ?)\s*الأقل|للأقل)|"
+    r"من\s*الاعلى\s*سعرا?\s*(?:(?:الى|الي|لـ?)\s*الاقل|للاقل)|"
+    r"من\s*الأعلى\s*سعراً?\s*(?:(?:الى|الي|لـ?)\s*الأقل|للأقل)|"
+    r"من\s*الاعلى\s*(?:(?:الى|الي|لـ?)\s*الاقل|للاقل)|"
+    r"من\s*الأعلى\s*(?:(?:الى|الي|لـ?)\s*الأقل|للأقل)|"
     r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاعلى|"
     r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأعلى|"
-    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاغلى\s*(?:الى|الي|لـ?)\s*الارخص|"
-    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأغلى\s*(?:الى|الي|لـ?)\s*الأرخص|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاغلى\s*(?:(?:الى|الي|لـ?)\s*الارخص|للارخص)|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأغلى\s*(?:(?:الى|الي|لـ?)\s*الأرخص|للأرخص)|"
     r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاغلى|"
     r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأغلى|"
     r"الاعلى\s*سعرا?|"
     r"الأعلى\s*سعراً?|"
-    r"رتب بالسعر تنازلي|رتب تنازلي|سعر تنازلي|تنازلي|من الاغلى|الاغلى|الأغلى|"
+    r"رتب بالسعر تنازلي|رتب تنازلي|سعر تنازلي|تنازلي|من الاغلى|من الأغلى|الاغلى|الأغلى|للاقل|للأقل|"
     r"highest price|most expensive|price high to low|sort desc|el aghla|men el aghla|aghla|rateb men el aghla"
     r")\b",
     re.IGNORECASE,
@@ -168,20 +286,31 @@ SORT_DESC_RE = re.compile(
 
 SORT_ASC_RE = re.compile(
     r"\b("
-    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاقل\s*سعرا?\s*(?:الى|الي|لـ?)\s*الاعلى|"
-    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأقل\s*سعراً?\s*(?:الى|الي|لـ?)\s*الأعلى|"
-    r"من\s*الاقل\s*سعرا?\s*(?:الى|الي|لـ?)\s*الاعلى|"
-    r"من\s*الأقل\s*سعراً?\s*(?:الى|الي|لـ?)\s*الأعلى|"
-    r"من\s*الاقل\s*(?:الى|الي|لـ?)\s*الاعلى|"
-    r"من\s*الأقل\s*(?:الى|الي|لـ?)\s*الأعلى|"
+    r"(?:مع\s*)?ترتيب\s*(?:هم|هن|ها)?\s*حسب\s*(?:الاسعار|الأسعار|السعر)|"
+    r"(?:مع\s*)?ترتيب\s*(?:هم|هن|ها)?\s*(?:بالاسعار|بالأسعار|بالسعر)|"
+    r"(?:مع\s*)?ترتيب\s*(?:الاسعار|الأسعار|السعر)|"
+    r"مرتب(?:ين|ة|ات)?\s*حسب\s*(?:الاسعار|الأسعار|السعر)|"
+    r"مرتب(?:ين|ة|ات)?\s*(?:بالاسعار|بالأسعار|بالسعر)|"
+    r"مترتب(?:ين|ة|ات)?\s*حسب\s*(?:الاسعار|الأسعار|السعر)|"
+    r"مترتب(?:ين|ة|ات)?\s*(?:بالاسعار|بالأسعار|بالسعر)|"
+    r"مرتب(?:ين|ة|ات)?|مترتب(?:ين|ة|ات)?|"
+    r"حسب\s*(?:الاسعار|الأسعار|السعر)|"
+    r"رتب\s*(?:هم|هن|ها)?\s*حسب\s*(?:الاسعار|الأسعار|السعر)|"
+    r"رتب\s*(?:هم|هن|ها)?\s*(?:بالسعر|بالاسعار|بالأسعار|الاسعار|الأسعار)|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاقل\s*سعرا?\s*(?:(?:الى|الي|لـ?)\s*الاعلى|للاعلى)|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأقل\s*سعراً?\s*(?:(?:الى|الي|لـ?)\s*الأعلى|للأعلى)|"
+    r"من\s*الاقل\s*سعرا?\s*(?:(?:الى|الي|لـ?)\s*الاعلى|للاعلى)|"
+    r"من\s*الأقل\s*سعراً?\s*(?:(?:الى|الي|لـ?)\s*الأعلى|للأعلى)|"
+    r"من\s*الاقل\s*(?:(?:الى|الي|لـ?)\s*الاعلى|للاعلى)|"
+    r"من\s*الأقل\s*(?:(?:الى|الي|لـ?)\s*الأعلى|للأعلى)|"
     r"رتب\s*(?:هم|هن|ها)?\s*من\s*الاقل|"
     r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأقل|"
-    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الارخص\s*(?:الى|الي|لـ?)\s*الاغلى|"
-    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأرخص\s*(?:الى|الي|لـ?)\s*الأغلى|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الارخص\s*(?:(?:الى|الي|لـ?)\s*الاغلى|للاغلى)|"
+    r"رتب\s*(?:هم|هن|ها)?\s*من\s*الأرخص\s*(?:(?:الى|الي|لـ?)\s*الأغلى|للأغلى)|"
     r"رتب\s*(?:هم|هن|ها)?\s*من\s*الارخص للاغلى|رتب من الارخص للاغلى|رتب من الارخص|رتب بالسعر تصاعدي|رتب بالسعر|رتب تصاعدي|سعر تصاعدي|تصاعدي|"
     r"الاقل\s*سعرا?|"
     r"الأقل\s*سعراً?|"
-    r"من الارخص|الارخص الاول|الارخص|ارخص|الأرخص|أرخص|"
+    r"من الارخص|الارخص الاول|الارخص|ارخص|الأرخص|أرخص|للاعلى|للأعلى|"
     r"cheapest first|cheapest|cheap|lowest price|price low to high|"
     r"sort by price|sort by lowest|sort by el arkhas|sort by|sort asc|rateb bel se3r el arkhas|rateb bel se3r|"
     r"rateb men el arkhas|هات الارخص الاول|show cheapest first|el arkhas|arkhas"
@@ -207,7 +336,7 @@ PRICE_MIN_RE = re.compile(
 
 # In-stock regex
 STOCK_IN_RE = re.compile(
-    r"\b(متوفر|المتوفر|متاح|المتاح|الموجود|في المخزن|in stock|available|only in stock|motawafer|el motawafer)\b",
+    r"\b(متوفر\w*|المتوفر\w*|متاح\w*|المتاح\w*|موجود\w*|الموجود\w*|في المخزن|in stock|available|only in stock|motawafer|el motawafer)\b",
     re.IGNORECASE,
 )
 STOCK_OUT_RE = re.compile(
@@ -226,11 +355,67 @@ def _extract_unsupported_filters(normalized: str) -> list[str]:
     return unsupported
 
 
+QUANTIFIERS_PATTERN = (
+    r"(?:انواع|نوع|أنواع|اصناف|أصناف|منتجات|عناصر|قطع|قطعة|علب|علبة|أكياس|كيس|حبات|حبة|"
+    r"ازايز|ازازة|زجاجات|زجاجة|items?|types?|products?|packs?|bottles?|pieces?)"
+)
+
+ARABIC_COUNT_WORDS = {
+    "واحد": 1, "واحدة": 1, "اتنين": 2, "اثنين": 2, "تلاتة": 3, "ثلاثة": 3,
+    "اربعة": 4, "أربعة": 4, "خمسة": 5, "ستة": 6, "سبعة": 7, "تمانية": 8, "ثمانية": 8,
+    "تسعة": 9, "عشرة": 10,
+}
+
+
+def extract_limit(text: str) -> Optional[int]:
+    """
+    Extracts explicit count/limit (e.g., '5 انواع فول', '3 علب لبن', 'top 5', '5 items').
+    Ignores numbers that belong to price boundaries (e.g. 'تحت 50 جنيه').
+    """
+    norm = normalize_text(text)
+
+    # 1. Check for digits in limit/count context (e.g. '5 انواع', 'افضل 5', 'top 5', '3 علب', '5 فول')
+    m_digit = re.search(
+        r"(?:top|أول|اول|افضل|أفضل|احسن|أحسن|عايز|عاوز|محتاج|هات)?\s*(\d+)\s*"
+        rf"(?:{QUANTIFIERS_PATTERN})?(?!\s*(?:جنيه|egp|le|pound|ج\b))",
+        norm,
+        re.IGNORECASE,
+    )
+    if m_digit:
+        val = int(m_digit.group(1))
+        # Validate that this number is not part of a price constraint
+        p_max = PRICE_MAX_RE.search(norm)
+        p_min = PRICE_MIN_RE.search(norm)
+        p_between = PRICE_BETWEEN_RE.search(norm)
+        is_price_num = False
+        if p_max and float(p_max.group(1)) == val:
+            is_price_num = True
+        if p_min and float(p_min.group(1)) == val:
+            is_price_num = True
+        if p_between and (float(p_between.group(1)) == val or float(p_between.group(2)) == val):
+            is_price_num = True
+
+        if not is_price_num and 1 <= val <= 100:
+            return min(val, 50)
+
+    # 2. Check for Arabic word numbers in count context
+    for word, num in ARABIC_COUNT_WORDS.items():
+        if re.search(
+            rf"\b(?:top|أول|اول|افضل|أفضل|احسن|أحسن)?\s*{word}\s*(?:{QUANTIFIERS_PATTERN})?\b",
+            norm,
+            re.IGNORECASE,
+        ):
+            return num
+
+    return None
+
+
 def sanitize_query(raw_text: str) -> str:
     """
     Sanitizes customer queries by stripping generic action verbs, request stems,
-    qualifiers/superlatives (افضل, نوع), meal/item request stems, and punctuation,
-    preserving the core entity/attribute.
+    qualifiers/superlatives (افضل, نوع), availability/stock words, price inquiry stems,
+    sorting expressions (including conjugated colloquial forms), numbers/quantifiers,
+    meal/item request stems, and punctuation, preserving strictly the core product entity.
     """
     text = raw_text.strip()
     # 1. Clean punctuation (Arabic question mark ؟, English ?, !, commas, etc.)
@@ -246,6 +431,27 @@ def sanitize_query(raw_text: str) -> str:
     )
     norm = request_stems_re.sub(" ", norm)
 
+    # 2b. Strip conjugated and colloquial sorting phrases completely
+    norm = SORT_DESC_RE.sub(" ", norm)
+    norm = SORT_ASC_RE.sub(" ", norm)
+    instruction_stems_re = re.compile(
+        r"\b("
+        r"مرتب(?:ين|ة|ات)?\s*حسب\s*(?:الاسعار|الأسعار|السعر)|"
+        r"مرتب(?:ين|ة|ات)?\s*(?:بالاسعار|بالأسعار|بالسعر)|"
+        r"مترتب(?:ين|ة|ات)?\s*حسب\s*(?:الاسعار|الأسعار|السعر)|"
+        r"مترتب(?:ين|ة|ات)?\s*(?:بالاسعار|بالأسعار|بالسعر)|"
+        r"مرتب(?:ين|ة|ات)?|مترتب(?:ين|ة|ات)?|"
+        r"(?:مع\s*)?ترتيب\s*(?:الاسعار|الأسعار|السعر|بالسعر|بالاسعار|بالأسعار|حسب\s*السعر|حسب\s*الاسعار)|"
+        r"رتب\s*(?:الاسعار|الأسعار|بالسعر|حسب\s*السعر)|"
+        r"رتبهم|رتبهن|رتبها|رتب|"
+        r"حسب\s*(?:الاسعار|الأسعار|السعر)|بالسعر|بالاسعار|بالأسعار|sort by price|sort by|مع\s*الترتيب|"
+        r"من\s*الارخص|من\s*الأرخص|من\s*الاغلى|من\s*الأغلى|من\s*الاعلى|من\s*الأعلى|من\s*الاقل|من\s*الأقل|"
+        r"الارخص|الأرخص|الاغلى|الأغلى|الاعلى|الأعلى|الاقل|الأقل|تصاعدي|تنازلي"
+        r")\b",
+        re.IGNORECASE,
+    )
+    norm = instruction_stems_re.sub(" ", norm)
+
     # 3. Superlatives, comparatives, and generic qualifiers (افضل, احسن, نوع, انواع)
     qualifiers_re = re.compile(
         r"\b(و?افضل\w*|و?أفضل\w*|و?احسن\w*|و?أحسن\w*|و?اجود\w*|و?أجود\w*|"
@@ -255,7 +461,31 @@ def sanitize_query(raw_text: str) -> str:
     )
     norm = qualifiers_re.sub(" ", norm)
 
-    # 4. Generic meal/item words when used as requests
+    # 4. Strip numbers and quantifiers / count nouns (e.g. "5", "خمسة", "انواع", "علب")
+    norm = re.sub(r"\b\d+\b", " ", norm)
+    arabic_num_words = r"\b(واحد|واحدة|اتنين|اثنين|تلاتة|ثلاثة|اربعة|أربعة|خمسة|ستة|سبعة|تمانية|ثمانية|تسعة|عشرة)\b"
+    norm = re.sub(arabic_num_words, " ", norm, flags=re.IGNORECASE)
+    quantifiers_re = re.compile(
+        rf"\b{QUANTIFIERS_PATTERN}\b",
+        re.IGNORECASE,
+    )
+    norm = quantifiers_re.sub(" ", norm)
+
+    # 5. Stock and availability tokens (موجود, متاح, متوفر)
+    stock_re = re.compile(
+        r"\b(موجود\w*|الموجود\w*|متاح\w*|المتاح\w*|متوفر\w*|المتوفر\w*|in\s*stock|available)\b",
+        re.IGNORECASE,
+    )
+    norm = stock_re.sub(" ", norm)
+
+    # 6. Price inquiry words (اسعار, أسعار, سعر)
+    price_inquiry_re = re.compile(
+        r"\b(اسعار|أسعار|سعر|كام\s*سعر|بكام|prices?|price\s*of)\b",
+        re.IGNORECASE,
+    )
+    norm = price_inquiry_re.sub(" ", norm)
+
+    # 7. Generic meal/item words when used as requests
     meal_stems_re = re.compile(
         r"\b(وجب[هة]|اكل[هة]|اكل|طبيخ|حاج[هة]|منتج\w*|عناصر|meal|food|dish|items?)\b",
         re.IGNORECASE,
@@ -263,6 +493,11 @@ def sanitize_query(raw_text: str) -> str:
     norm = meal_stems_re.sub(" ", norm)
 
     norm = re.sub(r"\s+", " ", norm).strip()
+
+    # Normalize isolated definite article for key entities ("الجبن" -> "جبن")
+    if norm in ("الجبن", "الجبنة", "اللبن", "الحليب", "الشاي", "السكر", "الزيت", "الفول"):
+        norm = norm[2:]
+
     return norm if len(norm) >= 2 else normalize_text(text).strip()
 
 
@@ -308,7 +543,7 @@ def _clean_query_string(raw: str, brand: Optional[str], unsupported: list[str]) 
         r"\b(ينفع مع|يمشي مع|goes well with|eh yenfa3 ma3|this|that|ده|دي|دا|da|di)\b",
         r"\b(اقترح عليا|اقترح|اقتراح|رشح|ترشحهولي|ترشحهالي|ترشحلي|ترشح|recommend|suggest|what do you recommend for|what do you recommend|ideas for|e2tra7 3alaya|e2tra7|ايه احسن)\b",
         r"\b(افضل|أفضل|احسن|أحسن|اجود|أجود|نوع|انواع|أنواع|صنف|اصناف|أصناف|best|top|types?|kinds?)\b",
-        r"\b(الاعلى|الأعلى|الاقل|الأقل|الاغلى|الأغلى|الارخص|الأرخص|سعرا|سعر|من|الى|الي|لـ)\b",
+        r"\b(للاعلى|للأعلى|للاقل|للأقل|للارخص|للأرخص|للاغلى|للأغلى|الاعلى|الأعلى|الاقل|الأقل|الاغلى|الأغلى|الارخص|الأرخص|سعرا|سعر|من|الى|الي|لـ)\b",
     ]
     for filler in fillers:
         cleaned = re.sub(filler, " ", cleaned, flags=re.IGNORECASE)
@@ -319,14 +554,6 @@ def _clean_query_string(raw: str, brand: Optional[str], unsupported: list[str]) 
 
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned if len(cleaned) >= 2 else None
-    for filler in fillers:
-        cleaned = re.sub(filler, " ", cleaned, flags=re.IGNORECASE)
-
-    # Remove unsupported tags
-    for _, tag in UNSUPPORTED_FILTER_PATTERNS:
-        cleaned = re.sub(rf"\b{re.escape(tag)}\b", " ", cleaned, flags=re.IGNORECASE)
-
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned if len(cleaned) >= 2 else None
 
 
@@ -492,118 +719,518 @@ def _rule_based_parse(raw_text: str, normalized: str) -> dict[str, Any]:
 # LLM Integration & Compact System Prompt (< 150 tokens)
 # ─────────────────────────────────────────────────────────────────────────────
 
-COMPACT_SYSTEM_PROMPT = (
-    "Grocery NLU parser. Output JSON:\n"
-    '{"intent":"search|refine|sort|recommend|compare|alternatives|cross-sell|out-of-scope",'
-    '"follow_up_type":"new_topic|refinement|cancellation|reference",'
-    '"query":str|null,"brand":str|null,"category":str|null,'
-    '"price_min":float|null,"price_max":float|null,"in_stock":bool|null,"sort":"price_asc|price_desc"|null,'
-    '"explicit_fields":[str],"unsupported_filters":[str]}\n'
-    "Rules: brand canonical only. unsupported_filters: dietary. strip superlatives/qualifiers (best/type/افضل/نوع). sorting alone -> intent:sort."
+AGENTIC_SYSTEM_PROMPT = (
+    "You are Spinneys Smart Grocery Shopping Assistant. You help customers find products, "
+    "suggest recipe ingredients, answer nutritional and comparative questions, and sort items. "
+    "You MUST strictly ground your answers in the available store data and never invent products, brands, or prices.\n\n"
+    "Analyze the customer's message, conversation history, and currently visible store items.\n"
+    "Respond strictly in JSON matching this schema:\n"
+    "{\n"
+    '  "action": "search" | "recipe" | "advisory_qa" | "count_inquiry" | "sort" | "out_of_scope",\n'
+    '  "intent": "search" | "recipe" | "advisory" | "count_inquiry" | "sort" | "out_of_scope",\n'
+    '  "clean_query": string | null,\n'
+    '  "primary_ingredient": string | null,\n'
+    '  "recipe_advice": string | null,\n'
+    '  "conversational_reply": string | null,\n'
+    '  "sort_by": "relevance" | "price_asc" | "price_desc",\n'
+    '  "limit": int,\n'
+    '  "attribute_focus": string | null,\n'
+    '  "category": string | null,\n'
+    '  "brand": string | null,\n'
+    '  "price_max": float | null,\n'
+    '  "price_min": float | null,\n'
+    '  "is_followup": boolean,\n'
+    '  "is_count_query": boolean\n'
+    "}\n\n"
+    "Strict Decision Rules:\n"
+    "1. RECIPE & COOKING INQUIRIES (e.g. 'وصفه للحمه', 'مكونات بيتزا', 'عايز اطبخ ملوخية', 'طريقة عمل كباب حلة'):\n"
+    "   - action: 'recipe'\n"
+    "   - intent: 'recipe'\n"
+    "   - recipe_advice: Briefly outline the core recipe, cooking steps, and essential ingredients in clear, appealing Arabic.\n"
+    "   - primary_ingredient: Concrete grocery entity in store catalog to retrieve product cards (e.g. for 'وصفه للحمه' -> 'لحم', for 'مكونات بيتزا' -> 'دقيق' or 'جبنة موتزاريلا').\n"
+    "   - clean_query: Same as primary_ingredient.\n"
+    "   - limit: 5.\n\n"
+    "2. CONVERSATIONAL & NUTRITIONAL Q&A (e.g. 'ايهم اعلى بروتين؟', 'ايه الفرق بينهم؟', 'انهي ارخص؟', 'مين احسن؟'):\n"
+    "   - When customer asks about previously displayed visible items (visible_products):\n"
+    "   - action: 'advisory_qa'\n"
+    "   - intent: 'advisory'\n"
+    "   - clean_query: null\n"
+    "   - conversational_reply: Write an intelligent, concise comparative answer in Arabic directly analyzing the visible items. Never invent non-existent products.\n\n"
+    "3. CATALOG SEARCH & REFINEMENTS (e.g. 'افضل 5 انواع فول', 'لبن جهينة', 'جبنة فيتا', 'افضل 3 منتجات من حيث نسبه البروتين'):\n"
+    "   - action: 'search'\n"
+    "   - intent: 'search'\n"
+    "   - clean_query: Clean searchable grocery entity. Strip numbers ('5', '3'), superlatives ('افضل', 'اجود', 'ارخص'), and fillers ('انواع', 'منتجات').\n"
+    "   - For protein queries ('بروتين'): clean_query='تونة صدور دجاج', attribute_focus='protein', limit=3.\n"
+    "   - limit: Extracted number (e.g. 5, 3), default: 10.\n"
+    "   - sort_by: 'price_asc' if cheapest requested ('ارخص', 'مرتبين حسب السعر'), 'price_desc' if most expensive ('اغلى'), else 'relevance'.\n\n"
+    "4. STANDALONE SORT (e.g. 'رتبهم من الارخص', 'رتب الاسعار تنازلي'):\n"
+    "   - action: 'sort'\n"
+    "   - intent: 'sort'\n"
+    "   - clean_query: null\n"
+    "   - sort_by: 'price_asc' | 'price_desc'\n"
+    "   - is_followup: true\n\n"
+    "5. COUNT & AGGREGATION INQUIRIES (e.g. 'كم نوع فول موجود', 'كم عدد انواع اللبن', 'how many types of...'):\n"
+    "   - action: 'count_inquiry'\n"
+    "   - intent: 'count_inquiry'\n"
+    "   - clean_query: Target product entity only (e.g. 'فول', 'لبن', 'زيت'). Strip question phrases ('كم نوع', 'كم عدد', 'موجود', 'أنواع').\n"
+    "   - is_count_query: true\n\n"
+    "6. OUT OF SCOPE (weather, politics, sports, coding):\n"
+    "   - action: 'out_of_scope'\n"
+    "   - intent: 'out_of_scope'\n"
+    "   - conversational_reply: Polite Arabic refusal explaining Spinneys scope."
+)
+
+COMPACT_SYSTEM_PROMPT = AGENTIC_SYSTEM_PROMPT  # backwards compatibility
+
+COUNT_INQUIRY_RE = re.compile(
+    r"\b(كم\s*نوع|كم\s*عدد|كم\s*صنف|عدد\s*انواع|عدد\s*الاصناف|عندكم\s*كم\s*نوع|في\s*كم\s*نوع|how many types|how many kinds|how many varieties|count of)\b",
+    re.IGNORECASE,
 )
 
 
-def parse_query(raw_text: str) -> ParseResult:
+def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
     """
-    Main NLU entry point. Performs hybrid parsing:
-      1. Normalize raw input via shared normalizer.
-      2. Run deterministic rule extraction.
-      3. If Groq LLM is available, consult LLM for semantic intent & complex phrasing.
-      4. Validate, normalize brand, isolate unsupported filters, and return canonical ParseResult.
+    Deterministic fallback parser used if Groq LLM is unavailable or fails.
+    Extracts strictly: intent, clean_query, semantic_expansion, limit, sort_by, attribute_focus,
+    category, price_max, price_min, is_followup, advisory_topic.
+    """
+    if OUT_OF_SCOPE_RE.search(normalized):
+        return {
+            "action": "out_of_scope",
+            "intent": "out_of_scope",
+            "clean_query": None,
+            "primary_ingredient": None,
+            "recipe_advice": None,
+            "conversational_reply": "أنا مساعد سبينيس الذكي للتسوق، أقدر أساعدك في البحث عن المنتجات والأسعار والوصفات في السوبرماركت.",
+            "semantic_expansion": None,
+            "limit": 10,
+            "sort_by": "relevance",
+            "attribute_focus": None,
+            "category": None,
+            "price_max": None,
+            "price_min": None,
+            "is_followup": False,
+            "is_count_query": False,
+            "advisory_topic": None,
+        }
+
+    # Count / Aggregation inquiry check
+    if COUNT_INQUIRY_RE.search(normalized):
+        cleaned_entity = COUNT_INQUIRY_RE.sub(" ", normalized)
+        cleaned_entity = re.sub(r"\b(موجود|متوفر|عندكم|في المتجر|في الفرع|أنواع|انواع|اصناف|أصناف|available|in store)\b", " ", cleaned_entity, flags=re.IGNORECASE)
+        cleaned_entity = sanitize_query(cleaned_entity)
+        if not cleaned_entity:
+            cleaned_entity = "فول" if "فول" in normalized else "منتجات"
+        return {
+            "action": "count_inquiry",
+            "intent": "count_inquiry",
+            "clean_query": cleaned_entity,
+            "primary_ingredient": None,
+            "recipe_advice": None,
+            "conversational_reply": None,
+            "semantic_expansion": None,
+            "limit": 10,
+            "sort_by": "relevance",
+            "attribute_focus": None,
+            "category": None,
+            "price_max": None,
+            "price_min": None,
+            "is_followup": False,
+            "is_count_query": True,
+            "advisory_topic": None,
+        }
+
+    # Recipe check
+    recipe_m = re.search(r"\b(وصف[هة]|طريقة عمل|طريقة تحضير|مكونات|مقادير|طبخ|اطبخ|recipe|cook)\s*(?:لـ?|لل)?\s*(.*)", normalized, re.IGNORECASE)
+    if recipe_m and any(w in normalized for w in ["لحم", "فراخ", "دجاج", "كيك", "بيتزا", "مكرون", "كباب", "سمك"]):
+        dish_raw = recipe_m.group(2).strip() or "لحم"
+        dish_raw = re.sub(r"\b(من فضلك|لو سمحت|عايز|عاوز|please)\b", "", dish_raw, flags=re.IGNORECASE).strip()
+        clean_dish = "لحم" if any(w in dish_raw for w in ["لحم", "لحمه", "لحمة"]) else (dish_raw or "لحم")
+        return {
+            "action": "recipe",
+            "intent": "recipe",
+            "clean_query": clean_dish,
+            "primary_ingredient": clean_dish,
+            "recipe_advice": f"إليك مقادير وطريقة تحضير أشهى {clean_dish} من منتجات سبينيس المتوفرة:",
+            "conversational_reply": None,
+            "semantic_expansion": None,
+            "limit": 5,
+            "sort_by": "relevance",
+            "attribute_focus": None,
+            "category": "meat" if "لحم" in clean_dish else None,
+            "price_max": None,
+            "price_min": None,
+            "is_followup": False,
+            "advisory_topic": None,
+        }
+
+    # 0. Advisory check - ONLY when no explicit product entity is being queried
+    has_prod = bool(PRODUCT_ENTITY_RE.search(normalized))
+    if ADVISORY_RE.search(normalized) and not has_prod:
+        advisory_topic = "quality"
+        if re.search(r"غذائ|سعرات|صحي|دايت|سكر|بروتين|calor|nutrit|protein", normalized, re.IGNORECASE):
+            advisory_topic = "nutrition"
+        elif re.search(r"فرق|مقارن|compare|diff", normalized, re.IGNORECASE):
+            advisory_topic = "comparison"
+        elif re.search(r"سعر|ارخص|اغلى|value|price", normalized, re.IGNORECASE):
+            advisory_topic = "price_value"
+        return {
+            "action": "advisory_qa",
+            "intent": "advisory",
+            "clean_query": None,
+            "primary_ingredient": None,
+            "recipe_advice": None,
+            "conversational_reply": None,
+            "semantic_expansion": None,
+            "limit": 10,
+            "sort_by": "relevance",
+            "attribute_focus": None,
+            "category": None,
+            "price_max": None,
+            "price_min": None,
+            "is_followup": True,
+            "advisory_topic": advisory_topic,
+        }
+
+    limit = extract_limit(raw_text) or 10
+    sort_by = "relevance"
+    if SORT_DESC_RE.search(normalized):
+        sort_by = "price_desc"
+    elif SORT_ASC_RE.search(normalized):
+        sort_by = "price_asc"
+
+    attribute_focus = None
+    category = None
+    mapped_query = None
+
+    if re.search(r"\b(بروتين|البروتين|protein)\b", normalized, re.IGNORECASE):
+        attribute_focus = "protein"
+        mapped_query = "تونة صدور دجاج"
+        category = "meat,poultry,seafood,canned food"
+        if not extract_limit(raw_text):
+            limit = 3
+    elif re.search(r"\b(سعرات|قليلة السعرات|قليل السعرات|منخفض السعرات|دايت|رجيم|low cal|low fat)\b", normalized, re.IGNORECASE):
+        attribute_focus = "low_fat"
+        mapped_query = "شوفان زبادي لايت سكر دايت تونة دايت"
+    elif re.search(r"\b(دهون صحية|دهون مفيدة|healthy fats)\b", normalized, re.IGNORECASE):
+        attribute_focus = "healthy_fats"
+        mapped_query = "زيت زيتون مكسرات سلمون"
+    elif re.search(r"\b(الياف|ألياف|fiber)\b", normalized, re.IGNORECASE):
+        attribute_focus = "fiber"
+        mapped_query = "شوفان فاصوليا عدس تفاح خضار"
+    elif re.search(r"\b(خالي من السكر|بدون سكر|sugar free)\b", normalized, re.IGNORECASE):
+        attribute_focus = "sugar_free"
+        mapped_query = "ستيفيا شاي بسكويت خالي من السكر"
+    elif re.search(r"\b(طاقة|energy)\b", normalized, re.IGNORECASE):
+        attribute_focus = "energy"
+        mapped_query = "تمر مكسرات عسل موز شوفان"
+    elif re.search(r"\b(ارخص|أرخص|الارخص|الأرخص|cheap)\b", normalized, re.IGNORECASE):
+        attribute_focus = "cheap"
+        sort_by = "price_asc"
+
+    # Price boundaries
+    price_min = None
+    price_max = None
+    p_between = PRICE_BETWEEN_RE.search(normalized)
+    if p_between:
+        price_min = float(p_between.group(1))
+        price_max = float(p_between.group(2))
+    else:
+        p_max = PRICE_MAX_RE.search(normalized)
+        if p_max:
+            price_max = float(p_max.group(1))
+        p_min = PRICE_MIN_RE.search(normalized)
+        if p_min:
+            price_min = float(p_min.group(1))
+
+    # In-stock
+    in_stock = None
+    if STOCK_IN_RE.search(normalized):
+        in_stock = True
+    elif STOCK_OUT_RE.search(normalized):
+        in_stock = False
+
+    # Brand
+    detected_brand = find_known_brand(raw_text) or find_known_brand(normalized)
+    brand = normalize_brand(detected_brand) if detected_brand else None
+
+    # Clean product query extraction
+    cleaned = sanitize_query(raw_text)
+    cleaned = SORT_DESC_RE.sub(" ", cleaned)
+    cleaned = SORT_ASC_RE.sub(" ", cleaned)
+    cleaned = PRICE_BETWEEN_RE.sub(" ", cleaned)
+    cleaned = PRICE_MAX_RE.sub(" ", cleaned)
+    cleaned = PRICE_MIN_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"\b(جنيه|egp|le|pounds?|pound|gneh|ج)\b", " ", cleaned, flags=re.IGNORECASE)
+
+    # Strip conversational filler words and constraint modifier words
+    fillers = [
+        r"\b(مع\s*ترتيب\s*الاسعار|ترتيب\s*الاسعار|ترتيب\s*بالسعر|رتب\s*الاسعار|رتبهم\s*بالسعر|رتب\s*بالسعر|رتبهم|رتبهن|رتبها|رتب|بالسعر|sort by price|sort by|مع\s*الترتيب)\b",
+        r"\b(عايز|عاوز|محتاج|ابحث عن|ابحث|دورلي على|دورلي|هاتلي|هات|اعرضلي|وريني|فين|من فضلك|لو سمحت|بس|فقط)\b",
+        r"\b(show me|find me|i want|i need|looking for|search for|give me|please|only|just|where is the|where is|show)\b",
+        r"\b(3ayez|hatly|warini|please|feen el|feen|first)\b",
+        r"\b(مارك[هة]|براند|brand|items?|منتجات?|في الفرع|in store|store|branch|price|سعر|اي|مش فارق|معايا|remove|filter|fine|is fine|all|any|bas|el|rateb)\b",
+        r"\b(بديل لـ?|بديل ل|بديل|alternative for|alternative|substitute for|substitute|badeel le|badeel)\b",
+        r"\b(الفرق بين|قارن بين|قارن|مقارنة|difference between|compare|versus|vs|2aren ben|2aren)\b",
+        r"\b(ينفع مع|يمشي مع|goes well with|eh yenfa3 ma3|this|that|ده|دي|دا|da|di)\b",
+        r"\b(اقترح عليا|اقترح|اقتراح|رشح|ترشحهولي|ترشحهالي|ترشحلي|ترشح|recommend|suggest|what do you recommend for|what do you recommend|ideas for|e2tra7 3alaya|e2tra7|ايه احسن)\b",
+        r"\b(افضل|أفضل|احسن|أحسن|اجود|أجود|نوع|انواع|أنواع|صنف|اصناف|أصناف|best|top|types?|kinds?)\b",
+        r"\b(للاعلى|للأعلى|للاقل|للأقل|للارخص|للأرخص|للاغلى|للأغلى|الاعلى|الأعلى|الاقل|الأقل|الاغلى|الأغلى|الارخص|الأرخص|سعرا|سعر|من|الى|الي|لـ)\b",
+    ]
+    for filler in fillers:
+        cleaned = re.sub(filler, " ", cleaned, flags=re.IGNORECASE)
+
+    if mapped_query:
+        clean_query = mapped_query
+    else:
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        clean_query = cleaned if len(cleaned) >= 2 else None
+
+    # Category heuristic if not already set
+    if not category:
+        if re.search(r"\b(لبن|حليب|زبادي|زبادو|جبن|جبنة|قشطة|milk|yogurt|dairy|cheese|laban)\b", normalized, re.IGNORECASE):
+            category = "dairy"
+        elif re.search(r"\b(شاي|قهوة|عصير|مشروب|بيبسي|كولا|tea|coffee|juice|soda)\b", normalized, re.IGNORECASE):
+            category = "beverages"
+
+    # Follow-up and intent detection
+    is_followup = bool(REFERENCE_RE.search(normalized)) or (clean_query is None and (sort_by != "relevance" or price_max is not None or price_min is not None))
+
+    if clean_query is None and sort_by != "relevance":
+        intent = "sort"
+    elif clean_query is None and (price_max is not None or price_min is not None):
+        intent = "filter"
+    elif clean_query is not None:
+        intent = "search"
+    else:
+        intent = "search"
+
+    explicit_fields = []
+    if brand:
+        explicit_fields.append("brand")
+    if price_max is not None:
+        explicit_fields.append("price_max")
+    if price_min is not None:
+        explicit_fields.append("price_min")
+    if limit is not None:
+        explicit_fields.append("limit")
+    if in_stock is not None:
+        explicit_fields.append("in_stock")
+    if sort_by != "relevance":
+        explicit_fields.append("sort")
+    if clean_query:
+        explicit_fields.append("query")
+
+    return {
+        "intent": intent,
+        "clean_query": clean_query,
+        "semantic_expansion": None,
+        "limit": limit,
+        "sort_by": sort_by,
+        "attribute_focus": attribute_focus,
+        "category": category,
+        "price_max": price_max,
+        "price_min": price_min,
+        "is_followup": is_followup,
+        "brand": brand,
+        "in_stock": in_stock,
+        "explicit_fields": explicit_fields,
+        "unsupported_filters": _extract_unsupported_filters(normalized),
+    }
+
+
+def parse_query(
+    raw_text: str,
+    session_context: Optional[dict[str, Any]] = None,
+    visible_products: Optional[list[dict[str, Any]]] = None,
+    conversation_history: Optional[list[dict[str, str]]] = None,
+) -> NLUResult:
+    """
+    Main Agentic Controller & NLU entry point using Groq (llama-3.1-8b-instant / llama-3.3-70b-versatile)
+    with seamless deterministic fallback.
     """
     t0 = time.perf_counter()
     normalized = normalize_text(raw_text)
+    llm = get_llm_client()
 
-    # 1. Deterministic baseline
-    rule_res = _rule_based_parse(raw_text, normalized)
-
-    llm_client = get_llm_client()
-    token_usage_dict: Optional[dict[str, int]] = None
-
-    # 2. Invoke Groq LLM if available and needed
-    if llm_client.is_available:
+    if llm.is_available:
         try:
-            llm_resp = llm_client.complete_json(
-                system_prompt=COMPACT_SYSTEM_PROMPT,
-                user_prompt=f"Customer query: {raw_text}\nNormalized: {normalized}",
+            user_prompt_parts = []
+            if visible_products:
+                items_summary = []
+                for idx, p in enumerate(visible_products[:6], 1):
+                    name = p.get("name_ar") or p.get("name_en") or p.get("product_name", "")
+                    price = p.get("price") or p.get("effective_price", 0.0)
+                    brand = p.get("brand", "")
+                    items_summary.append(f"{idx}. {name} (Brand: {brand}, Price: {price} EGP)")
+                user_prompt_parts.append("Currently visible store items:\n" + "\n".join(items_summary))
+
+            if conversation_history:
+                recent_history = conversation_history[-4:]
+                history_lines = [f"{msg.get('role', 'user')}: {msg.get('content', '')}" for msg in recent_history]
+                user_prompt_parts.append("Conversation history:\n" + "\n".join(history_lines))
+
+            user_prompt_parts.append(f"Customer query: '{raw_text}'")
+            full_user_prompt = "\n\n".join(user_prompt_parts)
+
+            resp = llm.complete_json(
+                system_prompt=AGENTIC_SYSTEM_PROMPT,
+                user_prompt=full_user_prompt,
+                temperature=0.0,
             )
-            llm_content = llm_resp.content
+            content = resp.content
+            if isinstance(content, dict):
+                # Normalize action & intent
+                raw_action = str(content.get("action", "search")).lower().replace("-", "_")
+                if raw_action not in ("search", "recipe", "advisory_qa", "count_inquiry", "sort", "out_of_scope"):
+                    raw_action = "search"
+                content["action"] = raw_action
 
-            if llm_resp.usage:
-                token_usage_dict = {
-                    "prompt_tokens": llm_resp.usage.prompt_tokens,
-                    "completion_tokens": llm_resp.usage.completion_tokens,
-                    "total_tokens": llm_resp.usage.total_tokens,
-                }
+                raw_intent = str(content.get("intent", raw_action)).lower().replace("-", "_")
+                if raw_intent not in ("search", "recipe", "advisory", "count_inquiry", "sort", "out_of_scope"):
+                    if raw_action == "recipe":
+                        raw_intent = "recipe"
+                    elif raw_action == "advisory_qa":
+                        raw_intent = "advisory"
+                    elif raw_action == "count_inquiry":
+                        raw_intent = "count_inquiry"
+                    else:
+                        raw_intent = raw_action
+                content["intent"] = raw_intent
 
-            # Merge LLM semantic insight with deterministic ground-truth
-            if llm_content.get("intent") in VALID_INTENTS:
-                # Deterministic rules are authoritative for high-precision intents
-                if rule_res["intent"] not in {"out-of-scope", "alternatives", "compare", "cross-sell", "sort", "refine"}:
-                    rule_res["intent"] = llm_content["intent"]
+                # Normalize sort_by
+                s_by = str(content.get("sort_by", "relevance")).lower()
+                if s_by not in ("price_asc", "price_desc", "relevance"):
+                    if "asc" in s_by or "low" in s_by or "arkhas" in s_by:
+                        content["sort_by"] = "price_asc"
+                    elif "desc" in s_by or "high" in s_by or "aghla" in s_by:
+                        content["sort_by"] = "price_desc"
+                    else:
+                        content["sort_by"] = "relevance"
 
-            if llm_content.get("follow_up_type") in VALID_FOLLOW_UP_TYPES:
-                if rule_res["follow_up_type"] not in {"cancellation", "refinement", "reference"}:
-                    rule_res["follow_up_type"] = llm_content["follow_up_type"]
+                # 1. Action: RECIPE
+                if content["action"] == "recipe":
+                    content["intent"] = "recipe"
+                    clean_ing = content.get("primary_ingredient") or content.get("clean_query")
+                    if not clean_ing or len(clean_ing.strip()) < 2:
+                        clean_ing = "لحم" if any(w in normalized for w in ["لحم", "لحمة", "لحمه", "كباب"]) else "دقيق"
+                    content["clean_query"] = clean_ing
+                    content["primary_ingredient"] = clean_ing
+                    content["limit"] = content.get("limit") or 5
+                    content["is_followup"] = False
 
-            # Merge unsupported filters
-            llm_unsupported = llm_content.get("unsupported_filters", [])
-            for u in llm_unsupported:
-                if u and u not in rule_res["unsupported_filters"]:
-                    rule_res["unsupported_filters"].append(u)
+                # 2. Action: ADVISORY_QA
+                elif content["action"] == "advisory_qa":
+                    content["intent"] = "advisory"
+                    content["clean_query"] = None
+                    content["primary_ingredient"] = None
+                    content["is_followup"] = True
+                    content["advisory_topic"] = "comparison"
 
-            # Check if LLM found brand if not already detected (suppressed for compare)
-            if not rule_res["brand"] and rule_res["intent"] != "compare" and llm_content.get("brand"):
-                canon_brand = normalize_brand(llm_content["brand"])
-                if canon_brand:
-                    rule_res["brand"] = canon_brand
-                    if "brand" not in rule_res["explicit_fields"]:
-                        rule_res["explicit_fields"].append("brand")
+                # 3. Action: COUNT_INQUIRY
+                elif content["action"] == "count_inquiry" or content.get("is_count_query") or (COUNT_INQUIRY_RE.search(normalized) and content["action"] not in ("recipe", "advisory_qa")):
+                    content["action"] = "count_inquiry"
+                    content["intent"] = "count_inquiry"
+                    content["is_count_query"] = True
+                    cq = content.get("clean_query")
+                    if not cq or any(w in cq for w in ["كم", "نوع", "عدد", "موجود"]):
+                        cleaned_cq = COUNT_INQUIRY_RE.sub(" ", normalized)
+                        cleaned_cq = re.sub(r"\b(موجود|متوفر|عندكم|في المتجر|في الفرع|أنواع|انواع|اصناف|أصناف|available|in store)\b", " ", cleaned_cq, flags=re.IGNORECASE)
+                        cleaned_cq = sanitize_query(cleaned_cq)
+                        content["clean_query"] = cleaned_cq or ("فول" if "فول" in normalized else "منتجات")
+                    content["primary_ingredient"] = None
+                    content["is_followup"] = False
 
+                # 3. Action: STANDALONE SORT
+                elif content["action"] == "sort":
+                    content["intent"] = "sort"
+                    content["clean_query"] = None
+                    content["primary_ingredient"] = None
+                    content["is_followup"] = True
+
+                # 4. Action: OUT_OF_SCOPE
+                elif content["action"] == "out_of_scope":
+                    content["intent"] = "out_of_scope"
+                    content["clean_query"] = None
+                    content["primary_ingredient"] = None
+
+                # 5. Action: SEARCH
+                else:
+                    content["action"] = "search"
+                    content["intent"] = "search"
+
+                    # Check if protein or health attribute
+                    if not content.get("attribute_focus"):
+                        if re.search(r"\b(بروتين|البروتين|protein)\b", normalized, re.IGNORECASE):
+                            content["attribute_focus"] = "protein"
+                        elif re.search(r"\b(سعرات|قليلة السعرات|قليل السعرات|منخفض السعرات|دايت|رجيم|low cal|low fat)\b", normalized, re.IGNORECASE):
+                            content["attribute_focus"] = "low_fat"
+
+                    af = content.get("attribute_focus")
+                    if af == "protein":
+                        content["clean_query"] = "تونة صدور دجاج"
+                        content["category"] = "meat,poultry,seafood,canned food"
+                        if not extract_limit(raw_text):
+                            content["limit"] = 3
+                        content["is_followup"] = False
+
+                    # Clean query sanity check
+                    cq = content.get("clean_query")
+                    if cq:
+                        cq_cleaned = sanitize_query(cq)
+                        content["clean_query"] = cq_cleaned if len(cq_cleaned) >= 2 else None
+                        if content["clean_query"] is None and content["sort_by"] != "relevance":
+                            content["action"] = "sort"
+                            content["intent"] = "sort"
+                            content["is_followup"] = True
+
+                    # Deterministic limit check
+                    det_limit = extract_limit(raw_text)
+                    if det_limit is not None and (content.get("limit") is None or content.get("limit") == 10):
+                        content["limit"] = det_limit
+                    elif content.get("limit") is None:
+                        content["limit"] = 10
+
+                content["raw_text"] = raw_text
+                content["normalized_text"] = normalized
+                content["latency_ms"] = round((time.perf_counter() - t0) * 1000.0, 2)
+                if resp.usage:
+                    content["token_usage"] = {
+                        "prompt_tokens": resp.usage.prompt_tokens,
+                        "completion_tokens": resp.usage.completion_tokens,
+                        "total_tokens": resp.usage.total_tokens,
+                    }
+
+                # Detect known brand if present
+                if content.get("clean_query"):
+                    detected = find_known_brand(content["clean_query"])
+                    if detected:
+                        content["brand"] = normalize_brand(detected)
+
+                explicit_fields = []
+                if content.get("brand"):
+                    explicit_fields.append("brand")
+                if content.get("price_max") is not None:
+                    explicit_fields.append("price_max")
+                if content.get("price_min") is not None:
+                    explicit_fields.append("price_min")
+                if content.get("limit") is not None:
+                    explicit_fields.append("limit")
+                if content.get("in_stock") is not None:
+                    explicit_fields.append("in_stock")
+                if content.get("sort_by") != "relevance":
+                    explicit_fields.append("sort")
+                if content.get("clean_query"):
+                    explicit_fields.append("query")
+                content["explicit_fields"] = explicit_fields
+
+                return NLUResult.model_validate(content)
         except Exception as exc:
-            # Fall back to deterministic rules on LLM failure
-            pass
+            log.warning("Groq structured NLU parsing failed (%s). Using fallback parser.", exc)
 
-    # 3. Validation & Canonical Normalization Layer
-    if rule_res["intent"] == "compare":
-        rule_res["brand"] = None
-
-    if rule_res["brand"]:
-        rule_res["brand"] = normalize_brand(rule_res["brand"])
-
-    # Ensure explicit_fields is accurate
-    explicit = set(rule_res["explicit_fields"])
-    if rule_res["brand"]:
-        explicit.add("brand")
-    if rule_res["price_max"] is not None:
-        explicit.add("price_max")
-    if rule_res["price_min"] is not None:
-        explicit.add("price_min")
-    if rule_res["in_stock"] is not None:
-        explicit.add("in_stock")
-    if rule_res["sort"] is not None:
-        explicit.add("sort")
-    if rule_res["query"]:
-        explicit.add("query")
-
-    rule_res["explicit_fields"] = sorted(list(explicit))
-
-    latency = (time.perf_counter() - t0) * 1000.0
-
-    return ParseResult(
-        raw_text=raw_text,
-        normalized_text=normalized,
-        intent=rule_res["intent"],
-        follow_up_type=rule_res["follow_up_type"],
-        query=rule_res["query"],
-        brand=rule_res["brand"],
-        category=rule_res["category"],
-        price_min=rule_res["price_min"],
-        price_max=rule_res["price_max"],
-        in_stock=rule_res["in_stock"],
-        sort=rule_res["sort"],
-        explicit_fields=rule_res["explicit_fields"],
-        unsupported_filters=rule_res["unsupported_filters"],
-        latency_ms=round(latency, 2),
-        token_usage=token_usage_dict,
-    )
+    # Fast deterministic fallback parser
+    fallback = _fast_fallback_parse(raw_text=raw_text, normalized=normalized)
+    fallback["raw_text"] = raw_text
+    fallback["normalized_text"] = normalized
+    fallback["latency_ms"] = round((time.perf_counter() - t0) * 1000.0, 2)
+    return NLUResult.model_validate(fallback)
