@@ -745,12 +745,15 @@ async def store_checkout(request: CheckoutRequest) -> dict[str, Any]:
 # Frontend Static Files & SPA Root Serving (Dynamic Absolute Path Resolution)
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Resolve paths relative to project root or execution directory
+# Resolve paths relative to project root, app package, or execution directory
 BASE_DIR = Path(__file__).resolve().parent.parent
 candidate_dirs = [
-    BASE_DIR / "frontend",
-    Path.cwd() / "frontend",
-    Path("/app/frontend"),
+    Path(__file__).resolve().parent / "frontend",  # app/frontend (right next to main.py)
+    BASE_DIR / "frontend",                         # repo_root/frontend
+    Path.cwd() / "frontend",                       # ./frontend
+    Path.cwd() / "app" / "frontend",               # ./app/frontend
+    Path("/app/frontend"),                         # /app/frontend (Railway standard)
+    Path("/app/app/frontend"),                     # /app/app/frontend (Railway nested)
     Path("frontend").resolve(),
 ]
 
@@ -772,11 +775,16 @@ if RESOLVED_FRONTEND_DIR and RESOLVED_FRONTEND_DIR.exists():
             return FileResponse(str(index_file))
         return JSONResponse({"message": "Frontend index.html not found on disk"})
 else:
-    log.warning("Frontend directory not found among candidates: %s", candidate_dirs)
+    log.warning("Frontend directory not found among candidates: %s (cwd=%s, __file__=%s)", candidate_dirs, Path.cwd(), __file__)
 
     @app.get("/")
     async def serve_root():
-        return JSONResponse({"message": "Spinneys Shopping Assistant API is running (frontend folder not found)"})
+        return JSONResponse({
+            "message": "Spinneys Shopping Assistant API is running (frontend folder not found)",
+            "cwd": str(Path.cwd()),
+            "file": str(__file__),
+            "dir_contents": os.listdir(Path.cwd()) if Path.cwd().exists() else [],
+        })
 
 
 # ─────────────────────────────────────────────────────────────────────────────

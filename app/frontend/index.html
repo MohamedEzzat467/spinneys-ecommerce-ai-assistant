@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>سبينيس هايبرماركت | Spinneys Egypt Online Store & AI Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Top Announcement Bar -->
+  <div class="top-bar">
+    <div class="container top-bar-content">
+      <div class="top-bar-left">
+        <span class="delivery-badge">🚚</span>
+        <span id="promo-text">توصيل مجاني لجميع الطلبات فوق 300 جنيه! | كاش أو بطاقة عند الاستلام</span>
+      </div>
+      <div class="top-bar-right">
+        <span class="support-text" id="support-text">خدمة العملاء: 16005</span>
+        <button id="langToggle" class="lang-switch-btn" title="Switch Language">
+          <span class="lang-icon">🌐</span>
+          <span id="lang-btn-text">English</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Header -->
+  <header class="main-header">
+    <div class="container header-container">
+      <!-- Brand Logo -->
+      <a href="#" class="brand-logo" id="home-logo">
+        <div class="logo-badge">🛒</div>
+        <div class="logo-text">
+          <span class="logo-title">SPINNEYS</span>
+          <span class="logo-subtitle">سبينيس مصر</span>
+        </div>
+      </a>
+
+      <!-- Search Bar -->
+      <div class="header-search">
+        <div class="search-input-wrapper">
+          <span class="search-icon">🔍</span>
+          <input 
+            type="text" 
+            id="store-search-input" 
+            placeholder="ابحث في أكثر من 25,800 منتج (مثال: حليب المراعي، أرز بسمتي، جبنة)..."
+            autocomplete="off"
+          />
+          <button id="search-clear-btn" class="search-clear-btn" style="display: none;">✕</button>
+        </div>
+      </div>
+
+      <!-- Header Actions: Cart & Assistant Shortcuts -->
+      <div class="header-actions">
+        <!-- Floating AI Chat Trigger in Header -->
+        <button id="header-ai-btn" class="header-ai-btn" title="المساعد الذكي">
+          <span class="ai-spark">✨</span>
+          <span class="ai-btn-label" id="header-ai-label">المساعد الذكي ✨</span>
+        </button>
+
+        <!-- Cart Button -->
+        <button id="cart-drawer-btn" class="header-cart-btn" aria-label="سلة التسوق">
+          <div class="cart-icon-wrapper">
+            <span class="cart-icon">🛍️</span>
+            <span class="cart-badge" id="cart-badge-count">0</span>
+          </div>
+          <div class="cart-btn-info">
+            <span class="cart-label" id="cart-title-label">سلة التسوق</span>
+            <span class="cart-total" id="header-cart-total">0.00 ج.م</span>
+          </div>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Category Navigation Ribbon -->
+  <nav class="category-nav">
+    <div class="container category-nav-container">
+      <ul class="category-tabs" id="category-tabs-list">
+        <li class="cat-tab active" data-category="all">
+          <span class="cat-icon">🏷️</span>
+          <span class="cat-name">جميع المنتجات</span>
+        </li>
+        <li class="cat-tab" data-category="Grocery">
+          <span class="cat-icon">🥫</span>
+          <span class="cat-name">البقالة والتموين</span>
+        </li>
+        <li class="cat-tab" data-category="Dairy">
+          <span class="cat-icon">🥛</span>
+          <span class="cat-name">الألبان والبيض</span>
+        </li>
+        <li class="cat-tab" data-category="Beverages">
+          <span class="cat-icon">☕</span>
+          <span class="cat-name">المشروبات</span>
+        </li>
+        <li class="cat-tab" data-category="Sweets & Snacks">
+          <span class="cat-icon">🍫</span>
+          <span class="cat-name">الحلويات والتسالي</span>
+        </li>
+        <li class="cat-tab" data-category="Beauty & Personal Care">
+          <span class="cat-icon">✨</span>
+          <span class="cat-name">العناية الشخصية</span>
+        </li>
+        <li class="cat-tab" data-category="Households">
+          <span class="cat-icon">🏠</span>
+          <span class="cat-name">المنزل والمطبخ</span>
+        </li>
+        <li class="cat-tab" data-category="Cleaning Products">
+          <span class="cat-icon">🧼</span>
+          <span class="cat-name">المنظفات</span>
+        </li>
+        <li class="cat-tab" data-category="Frozen Food">
+          <span class="cat-icon">❄️</span>
+          <span class="cat-name">المجمدات</span>
+        </li>
+        <li class="cat-tab" data-category="Fruits & Vegetables">
+          <span class="cat-icon">🍎</span>
+          <span class="cat-name">الخضار والفاكهة</span>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Hero Promo Banner -->
+  <section class="hero-banner">
+    <div class="container hero-container">
+      <div class="hero-content">
+        <span class="hero-tag" id="hero-tag">🔥 عروض وخصومات حصرية</span>
+        <h1 class="hero-title" id="hero-title">تسوق كل احتياجات منزلك مع سبينيس</h1>
+        <p class="hero-desc" id="hero-desc">أكثر من 25,800 منتج طازج ومضمون بأسعار الجملة، مع مساعد تسوق ذكي يساعدك في إعداد وجباتك وقوائمك في ثوانٍ.</p>
+        <div class="hero-actions">
+          <button id="hero-explore-btn" class="btn-primary">تصفح العروض الآن</button>
+          <button id="hero-recipe-btn" class="btn-outline-white">🍲 اطلب مقادير وصفة بالذكاء الاصطناعي</button>
+        </div>
+      </div>
+      <div class="hero-stats">
+        <div class="stat-card">
+          <span class="stat-number" id="stat-num-products">25.8K+</span>
+          <span class="stat-label" id="stat-lbl-products">+25.8K منتج متاح بالكتالوج</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-number" id="stat-num-delivery">&lt; 45 دقيقة</span>
+          <span class="stat-label" id="stat-lbl-delivery">&gt; 45 دقيقة سرعة التوصيل لباب بيتك</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-number" id="stat-num-quality">100%</span>
+          <span class="stat-label" id="stat-lbl-quality">100% جودة وأصالة مضمونة</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Main Store Layout: Sidebar Filters + Products Grid -->
+  <main class="store-main container">
+    <div class="store-grid-layout">
+
+      <!-- Left Sidebar Filters -->
+      <aside class="store-sidebar">
+        <div class="sidebar-header">
+          <span class="sidebar-title" id="sidebar-title">🔍 تصفية المنتجات</span>
+          <button id="btn-reset-filters" class="btn-text-link">إعادة تعيين</button>
+        </div>
+
+        <!-- In-Stock Only Toggle -->
+        <div class="filter-section">
+          <label class="toggle-switch-label">
+            <input type="checkbox" id="filter-instock" checked>
+            <span class="switch-slider"></span>
+            <span class="toggle-text" id="lbl-instock">المتوفر في المخزن فقط</span>
+          </label>
+        </div>
+
+        <!-- Price Range Slider -->
+        <div class="filter-section">
+          <h4 class="filter-heading" id="lbl-pricerange">نطاق السعر (ج.م)</h4>
+          <div class="price-range-inputs">
+            <div class="price-box">
+              <span class="price-label" id="lbl-price-from">من:</span>
+              <input type="number" id="price-min-input" value="0" min="0" max="5000">
+            </div>
+            <div class="price-box">
+              <span class="price-label" id="lbl-price-to">إلى:</span>
+              <input type="number" id="price-max-input" value="1000" min="1" max="10000">
+            </div>
+          </div>
+          <button id="btn-apply-price" class="btn-secondary-sm">تطبيق السعر</button>
+        </div>
+
+        <!-- Categories List -->
+        <div class="filter-section">
+          <h4 class="filter-heading" id="lbl-categories">الأقسام</h4>
+          <div class="filter-scrollable-list" id="sidebar-categories-list">
+            <!-- Populated dynamically via JS -->
+          </div>
+        </div>
+
+        <!-- Brands Filter -->
+        <div class="filter-section">
+          <h4 class="filter-heading" id="lbl-brands">الماركات الشهيرة</h4>
+          <div class="filter-search-box">
+            <input type="text" id="brand-search-input" placeholder="بحث عن ماركة...">
+          </div>
+          <div class="filter-scrollable-list" id="sidebar-brands-list">
+            <!-- Populated dynamically via JS -->
+          </div>
+        </div>
+      </aside>
+
+      <!-- Products Grid Section -->
+      <section class="store-products-section">
+        <!-- Store Toolbar: Results count, Active Filters, Sorting -->
+        <div class="products-toolbar">
+          <div class="toolbar-left">
+            <span class="results-count" id="results-count-text">جاري تحميل المنتجات...</span>
+            <div class="active-store-filters" id="active-store-tags"></div>
+          </div>
+          <div class="toolbar-right">
+            <label for="store-sort-select" class="sort-label" id="lbl-sort">الترتيب حسب:</label>
+            <select id="store-sort-select" class="store-select">
+              <option value="popular">الأكثر شعبية والعروض</option>
+              <option value="price_asc">السعر: من الأقل للأعلى</option>
+              <option value="price_desc">السعر: من الأعلى للأقل</option>
+              <option value="discount">أعلى نسبة خصم</option>
+              <option value="name_asc">الاسم: أبجدياً</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Products Cards Grid -->
+        <div class="products-grid" id="products-grid-container">
+          <!-- Populated dynamically with product cards -->
+        </div>
+
+        <!-- Loading Spinner -->
+        <div class="grid-loading-indicator" id="grid-loader" style="display: none;">
+          <div class="spinner"></div>
+          <span>جاري تحديث المنتجات...</span>
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-products-state" id="empty-state" style="display: none;">
+          <span class="empty-icon">🛒</span>
+          <h3>لم نجد أي منتجات تطابق اختياراتك!</h3>
+          <p>جرب تغيير شروط البحث، أو توسيع نطاق السعر، أو اضغط زر إعادة التعيين.</p>
+          <button id="btn-empty-reset" class="btn-primary">إعادة تعيين الفلاتر</button>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="pagination-bar" id="pagination-bar">
+          <button id="btn-prev-page" class="btn-page" disabled>السابق</button>
+          <div class="page-numbers" id="page-numbers-container"></div>
+          <button id="btn-next-page" class="btn-page">التالي</button>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Slide-out Shopping Cart Drawer -->
+  <div class="cart-drawer-overlay" id="cart-drawer-overlay"></div>
+  <aside class="cart-drawer" id="cart-drawer">
+    <div class="drawer-header">
+      <div class="drawer-title">
+        <span class="drawer-icon">🛍️</span>
+        <h3><span id="drawer-title-text">سلة المشتريات</span> (<span id="drawer-items-count">0</span>)</h3>
+      </div>
+      <button class="drawer-close-btn" id="drawer-close-btn" aria-label="إغلاق السلة">✕</button>
+    </div>
+
+    <!-- Free Delivery Progress -->
+    <div class="delivery-progress-box">
+      <div class="progress-label" id="delivery-progress-text">أضف منتجات بقيمة 300 ج.م للحصول على توصيل مجاني!</div>
+      <div class="progress-track">
+        <div class="progress-fill" id="delivery-progress-fill" style="width: 0%;"></div>
+      </div>
+    </div>
+
+    <!-- Cart Items Stream -->
+    <div class="drawer-items-stream" id="cart-items-stream">
+      <!-- Populated dynamically -->
+    </div>
+
+    <!-- Drawer Footer / Summary -->
+    <div class="drawer-footer" id="drawer-footer">
+      <div class="summary-line">
+        <span class="lbl" id="lbl-subtotal">المجموع الفرعي:</span>
+        <span class="val" id="summary-subtotal">0.00 ج.م</span>
+      </div>
+      <div class="summary-line">
+        <span class="lbl" id="lbl-delivery">رسوم التوصيل:</span>
+        <span class="val" id="summary-delivery">20.00 ج.م</span>
+      </div>
+      <div class="summary-total-line">
+        <span class="lbl" id="lbl-total">الإجمالي الكلي:</span>
+        <span class="val" id="summary-total">0.00 ج.م</span>
+      </div>
+
+      <div class="drawer-actions">
+        <button id="btn-checkout-drawer" class="btn-checkout-primary">
+          <span id="btn-checkout-text">إتمام الطلب الآن</span>
+          <span class="checkout-arrow">←</span>
+        </button>
+        <button id="btn-clear-cart" class="btn-clear-cart">تفريغ السلة</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Checkout Flow Modal -->
+  <div class="modal-overlay" id="checkout-modal-overlay" style="display: none;">
+    <div class="checkout-modal" id="checkout-modal">
+      <div class="modal-header">
+        <div class="modal-title">
+          <span>💳</span>
+          <h3 id="checkout-modal-title">إتمام الطلب والتوصيل | Spinneys Checkout</h3>
+        </div>
+        <button class="modal-close-btn" id="checkout-modal-close">✕</button>
+      </div>
+
+      <!-- Checkout Form View -->
+      <form id="checkout-form" class="checkout-form">
+        <div class="form-grid">
+          <div class="form-group">
+            <label for="cust-name" id="lbl-cust-name">الاسم بالكامل *</label>
+            <input type="text" id="cust-name" placeholder="محمد أحمد" required>
+          </div>
+          <div class="form-group">
+            <label for="cust-phone" id="lbl-cust-phone">رقم الهاتف المحمول *</label>
+            <input type="tel" id="cust-phone" placeholder="01001234567" required>
+          </div>
+          <div class="form-group full-width">
+            <label for="cust-address" id="lbl-cust-address">عنوان التوصيل بالتفصيل *</label>
+            <input type="text" id="cust-address" placeholder="المدينة، الحي، اسم الشارع، رقم العمارة والشقة" required>
+          </div>
+          <div class="form-group full-width">
+            <label for="cust-notes" id="lbl-cust-notes">ملاحظات التوصيل (اختياري)</label>
+            <input type="text" id="cust-notes" placeholder="مثال: يرجى الاتصال عند الوصول، الدور الرابع">
+          </div>
+          <div class="form-group full-width">
+            <label id="lbl-payment-method">طريقة الدفع *</label>
+            <div class="payment-options">
+              <label class="payment-radio selected">
+                <input type="radio" name="payment_method" value="Cash on Delivery" checked>
+                <span class="pay-icon">💵</span>
+                <span class="pay-label" id="lbl-pay-cash">الدفع نقداً عند الاستلام (Cash on Delivery)</span>
+              </label>
+              <label class="payment-radio">
+                <input type="radio" name="payment_method" value="Credit Card (Mock)">
+                <span class="pay-icon">💳</span>
+                <span class="pay-label" id="lbl-pay-card">بطاقة بنكية / فيزا (Mock Payment)</span>
+              </label>
+              <label class="payment-radio">
+                <input type="radio" name="payment_method" value="Mobile Wallet">
+                <span class="pay-icon">📱</span>
+                <span class="pay-label" id="lbl-pay-wallet">محفظة إلكترونية (فودافون كاش / إنستاباي)</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Checkout Mini Summary -->
+        <div class="checkout-summary-box">
+          <div class="chk-row">
+            <span id="lbl-chk-items">عدد الأصناف:</span>
+            <span id="chk-items-count">0</span>
+          </div>
+          <div class="chk-row">
+            <span id="lbl-chk-subtotal">المجموع الفرعي:</span>
+            <span id="chk-subtotal">0.00 ج.م</span>
+          </div>
+          <div class="chk-row">
+            <span id="lbl-chk-delivery">خدمة التوصيل:</span>
+            <span id="chk-delivery">20.00 ج.م</span>
+          </div>
+          <div class="chk-total-row">
+            <span id="lbl-chk-total">المبلغ المستحق:</span>
+            <span id="chk-total">0.00 ج.م</span>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="submit" id="btn-submit-order" class="btn-checkout-primary">
+            <span id="btn-submit-order-text">تأكيد الطلب وشحن المنتجات</span>
+          </button>
+        </div>
+      </form>
+
+      <!-- Order Receipt Confirmation View (Success) -->
+      <div class="order-receipt-view" id="order-receipt-view" style="display: none;">
+        <div class="receipt-success-badge">✅</div>
+        <h2 id="rcpt-h2">تم تأكيد طلبك بنجاح!</h2>
+        <p class="receipt-subtitle" id="rcpt-p-subtitle">شكراً لتسوقك من سبينيس. سيصلك مندوب التوصيل في أقرب وقت.</p>
+
+        <div class="receipt-card">
+          <div class="receipt-row">
+            <span class="r-lbl" id="lbl-rcpt-id">رقم مرجع الطلب (Order ID):</span>
+            <span class="r-val highlight" id="rcpt-order-id">SPN-2026-XXXX</span>
+          </div>
+          <div class="receipt-row">
+            <span class="r-lbl" id="lbl-rcpt-status">حالة الطلب:</span>
+            <span class="r-val" id="rcpt-status">مؤكد وجاري التجهيز</span>
+          </div>
+          <div class="receipt-row">
+            <span class="r-lbl" id="lbl-rcpt-eta">وقت التوصيل المتوقع:</span>
+            <span class="r-val" id="rcpt-eta">خلال 45 - 60 دقيقة</span>
+          </div>
+          <div class="receipt-row">
+            <span class="r-lbl" id="lbl-rcpt-payment">طريقة الدفع:</span>
+            <span class="r-val" id="rcpt-payment">الدفع عند الاستلام</span>
+          </div>
+          <div class="receipt-row">
+            <span class="r-lbl" id="lbl-rcpt-address">العنوان:</span>
+            <span class="r-val" id="rcpt-address">-</span>
+          </div>
+          <div class="receipt-total-row">
+            <span class="r-lbl" id="lbl-rcpt-total">المبلغ الإجمالي:</span>
+            <span class="r-val total-price" id="rcpt-total">0.00 ج.م</span>
+          </div>
+        </div>
+
+        <button id="btn-continue-shopping" class="btn-primary">متابعة التسوق</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- FLOATING AI ASSISTANT WIDGET (الدردشة الذكية العائمة) -->
+  <div class="floating-ai-widget" id="floating-ai-widget">
+    <!-- Trigger Floating Bubble Button -->
+    <button class="ai-launcher-btn" id="ai-launcher-btn" aria-label="مساعد سبينيس الذكي">
+      <div class="launcher-pulse"></div>
+      <div class="launcher-icon">🤖</div>
+      <div class="launcher-badge" id="ai-badge">مساعد سبينيس</div>
+    </button>
+
+    <!-- Chat Overlay Window -->
+    <div class="ai-chat-overlay" id="ai-chat-overlay" style="display: none;">
+      <!-- Overlay Header -->
+      <div class="chat-overlay-header">
+        <div class="chat-brand">
+          <div class="chat-avatar">🤖</div>
+          <div class="chat-meta">
+            <h4 id="ai-overlay-title">مساعد سبينيس الذكي</h4>
+            <span class="status-online" id="ai-overlay-status"><span class="dot"></span> متصل بـ 25,880 منتج</span>
+          </div>
+        </div>
+        <div class="chat-controls">
+          <button id="btn-ai-new-chat" class="btn-icon-control" title="محادثة جديدة">🔄</button>
+          <button id="btn-ai-minimize" class="btn-icon-control" title="تصغير">✕</button>
+        </div>
+      </div>
+
+      <!-- Active Assistant Filter Chips -->
+      <div class="ai-active-filters-bar" id="ai-filters-bar" style="display: none;">
+        <span class="chips-title" id="ai-chips-title">🎯 الفلاتر:</span>
+        <div class="chips-wrapper" id="ai-chips-container"></div>
+      </div>
+
+      <!-- Messages Stream -->
+      <div class="ai-messages-stream" id="ai-messages-stream">
+        <div class="chat-msg assistant-msg">
+          <div class="msg-avatar">🤖</div>
+          <div class="msg-bubble">
+            <p id="ai-welcome-p">أهلاً بك! 👋 أنا مساعدك الذكي في سبينيس. اطلب أي منتج أو وصفة طبخ وسأبحث لك فوراً:</p>
+            <div class="chat-quick-suggestions" id="ai-quick-suggestions">
+              <button class="chat-chip-prompt" data-query="عايز لبن شوفان">🥛 لبن شوفان</button>
+              <button class="chat-chip-prompt" data-query="جبنة دومتي فيتا اقل من 50 جنيه">🧀 دومتي تحت 50ج</button>
+              <button class="chat-chip-prompt" data-query="عايز اعمل مكرونة بشاميل">🍲 مكرونة بشاميل</button>
+              <button class="chat-chip-prompt" data-query="شاي بس مش ليبتون">☕ شاي بدون ليبتون</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Typing Indicator -->
+      <div class="chat-typing-indicator" id="chat-typing-indicator" style="display: none;">
+        <div class="msg-avatar">🤖</div>
+        <div class="typing-bubble">
+          <span></span><span></span><span></span>
+        </div>
+        <span class="typing-text" id="ai-typing-text">جاري البحث في الكتالوج...</span>
+      </div>
+
+      <!-- Chat Input Area -->
+      <div class="chat-input-bar">
+        <form id="ai-chat-form" class="ai-input-form">
+          <input 
+            type="text" 
+            id="ai-message-input" 
+            placeholder="اكتب طلبك... (مثال: لبن جهينة، أو مكونات بيتزا)" 
+            autocomplete="off"
+            required
+          />
+          <button type="submit" id="btn-ai-send" class="btn-ai-send" title="إرسال">
+            <span>➤</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification System -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Scripts -->
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
