@@ -13,19 +13,20 @@
 // ── Configurable Cloud & Local Backend API Endpoint ────────────────────────
 const getApiBaseUrl = () => {
   if (typeof window !== "undefined") {
-    // 1. Explicit window override (e.g. from config.js)
+    // 1. Explicit window override (e.g. from config.js or external CDN)
     if (window.__SPINNEYS_API_BASE__) return window.__SPINNEYS_API_BASE__.replace(/\/+$/, "");
     // 2. Local storage override (set via console or settings)
     const stored = localStorage.getItem("spinneys_api_base");
     if (stored) return stored.replace(/\/+$/, "");
-    // 3. Localhost development fallback
+    // 3. Standalone dev server fallback (e.g. Live Server on port 3000 / 5500)
     const host = window.location.hostname;
-    const isLocal = host === "localhost" || host === "127.0.0.1" || host === "";
-    if (isLocal) return "http://localhost:8000";
-    // 4. If served from the same host on port 8000 or custom port
-    if (window.location.port === "8000") return window.location.origin;
+    const port = window.location.port;
+    if ((host === "localhost" || host === "127.0.0.1") && port && port !== "8000") {
+      return "http://localhost:8000";
+    }
   }
-  return "http://localhost:8000";
+  // 4. Default: Relative path for unified same-origin deployment (Render / Cloud)
+  return "";
 };
 
 const API_BASE = getApiBaseUrl();

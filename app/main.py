@@ -20,11 +20,14 @@ from typing import Optional, Any
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 from pydantic import BaseModel, Field
 
 # ── Load .env before importing internal modules ────────────────────────────────
 from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
+FRONTEND_DIR = ROOT / "frontend"
 load_dotenv(ROOT / ".env")
 
 from app.retrieval.vector_store import VectorStore, SearchFilters, SearchResult
@@ -739,16 +742,37 @@ async def store_checkout(request: CheckoutRequest) -> dict[str, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Dev entry point
+# Frontend Static Files & SPA Root Serving
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/", include_in_schema=False)
+async def serve_frontend_root():
+    """
+    Serves the main storefront and conversational AI assistant single-page application.
+    """
+    index_file = FRONTEND_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    return {"message": "Spinneys Conversational Shopping Assistant API"}
+
+
+if FRONTEND_DIR.exists():
+    # Mount frontend directory to serve CSS, JS, images, icons without colliding with API routes
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Dev entry point & Cloud Dynamic Port Binding
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
 
+    port = int(os.environ.get("PORT", 8000))
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
-        port=8000,
-        reload=True,
+        port=port,
+        reload=False,
         log_level="info",
     )
