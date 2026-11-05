@@ -745,20 +745,16 @@ async def store_checkout(request: CheckoutRequest) -> dict[str, Any]:
 # Frontend Static Files & SPA Root Serving
 # ─────────────────────────────────────────────────────────────────────────────
 
-@app.get("/", include_in_schema=False)
-async def serve_frontend_root():
-    """
-    Serves the main storefront and conversational AI assistant single-page application.
-    """
-    index_file = FRONTEND_DIR / "index.html"
-    if index_file.exists():
-        return FileResponse(str(index_file))
-    return {"message": "Spinneys Conversational Shopping Assistant API"}
+@app.get("/")
+async def serve_index():
+    index_file = FRONTEND_DIR / "index.html" if (FRONTEND_DIR / "index.html").exists() else Path("frontend/index.html")
+    return FileResponse(str(index_file))
 
 
-if FRONTEND_DIR.exists():
-    # Mount frontend directory to serve CSS, JS, images, icons without colliding with API routes
-    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+static_dir = str(FRONTEND_DIR if FRONTEND_DIR.exists() else Path("frontend"))
+# Mount frontend directory using StaticFiles under /static and root
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
+app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
