@@ -3,10 +3,11 @@
 
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111.0-009688?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=flat&logo=python)](https://python.org)
+[![Groq](https://img.shields.io/badge/Groq-Llama%203.1%20%2F%203.3-f55036?style=flat)](https://groq.com/)
 [![ChromaDB](https://img.shields.io/badge/ChromaDB-VectorStore-orange?style=flat)](https://www.trychroma.com/)
 [![License](https://img.shields.io/badge/License-Proprietary-red)]()
 
-A high-performance, bilingual (Arabic & English) conversational AI shopping assistant and hybrid product retrieval engine powered by **FastAPI**, **In-Memory BM25**, **ChromaDB Dense Vectors**, and a compact **Llama 3 / Deterministic NLU Parser**. 
+A high-performance, bilingual (Arabic & English) conversational AI shopping assistant and hybrid product retrieval engine powered by **FastAPI**, **In-Memory BM25**, **ChromaDB Dense Vectors**, and an **LLM-First Agentic Central Controller** using Groq Structured Outputs (`llama-3.1-8b-instant` / `llama-3.3-70b-versatile`).
 
 Built over the real Spinneys retail catalog of **25,881 products**, the assistant guarantees ultra-low retrieval latency (< 40 ms fast-path), 100% catalog grounding, active multi-turn context tracking, and an interactive Arabic-first Chat UI.
 
@@ -30,15 +31,28 @@ Built over the real Spinneys retail catalog of **25,881 products**, the assistan
                      |                                                               |
                      v                                                               v
        +----------------------------+                                  +----------------------------+
-       |   Multi-Turn Session State |                                  |      NLU Hybrid Parser     |
-       |   app/state/context.py     |                                  |      app/nlu/parser.py     |
-       |   - Refinement             |                                  |   - Intent Classification  |
-       |   - Topic Switch           |<---------------------------------|   - Filter Entity Parsing  |
-       |   - Cancellation           |     Merged Context Filters       |   - Guardrail Detection    |
-       |   - Item References        |                                  |   - Prompt: <= 150 Tokens  |
-       +--------------+-------------+                                  +----------------------------+
-                      |
-                      v
+       |   Multi-Turn Session State |                                  |  LLM Central Controller    |
+       |   app/state/context.py     |                                  |  app/nlu/parser.py (Groq)  |
+       |   - Refinements            |<---------------------------------|  - Structured JSON Schema  |
+       |   - Contextual Filters     |      Action / Intent Signals     |  - Fast-Path Preprocessing |
+       |   - Visible Product Cards  |                                  |  - Nutrition & Health Map  |
+       +--------------+-------------+                                  +--------------+-------------+
+                      |                                                               |
+                      +-------------------------------+-------------------------------+
+                                                      |
+                                                      v
+       +--------------------------------------------------------------------------------------------+
+       |                        Conversational Dispatch Router (app/main.py)                        |
+       |                                                                                            |
+       |  [Route 0: Aggregation]      -> Entity catalog count & varieties (e.g. "كم نوع فول")        |
+       |  [Route 1: Recipe Engine]    -> Ingredient breakdown & smart cart (e.g. "وصفة مكرونة")      |
+       |  [Route 2: Advisory & Q&A]   -> 100% grounded on visible cards (no hallucinations)         |
+       |  [Route 3: In-Memory Sort]   -> Instant re-sort of visible results (price asc/desc)        |
+       |  [Route 4: Guardrails]       -> Out-of-scope redirection to grocery domain                 |
+       |  [Route 5: Hybrid Search]    -> In-memory fast filter + BM25 + Dense Vectors (ChromaDB)    |
+       +----------------------------------------------+---------------------------------------------+
+                                                      |
+                                                      v
        +--------------------------------------------------------------------------------------------+
        |                        Hybrid Product Retrieval Engine (app/retrieval/)                    |
        |                                                                                            |
@@ -57,6 +71,29 @@ Built over the real Spinneys retail catalog of **25,881 products**, the assistan
 
 ---
 
+## ⚡ Agentic Capabilities & Conversational Pipeline
+
+### 1. LLM-First Central Controller (`app/nlu/parser.py`)
+- **Structured JSON Mode**: Powered by Groq (`llama-3.1-8b-instant` with automatic fallback to `llama-3.3-70b-versatile`).
+- **Semantic Health & Nutrition Expansion**: Translates abstract goals (`"بروتين"`, `"قليل السعرات"`, `"دايت"`) into targeted staple grocery entities (`"تونة صدور دجاج"`, `"زبادي يوناني"`, etc.) with price-threshold guards.
+- **Fast-Path Fallback**: Deterministic regex preprocessor ensures sub-millisecond query parsing when offline or during rate limits.
+
+### 2. Conversational Advisory & Comparative Grounding (`app/main.py`)
+- **Strict Anti-Hallucination Guard**: When customers ask follow-up comparative or nutritional questions (`"انهي افضل من حيث القيمة الغذائية؟"`, `"ايه الفرق بينهم؟"`), the assistant grounds answers strictly in the products visible in `session_context.last_results` without issuing redundant catalog queries.
+- **Voucher & Junk Purge**: Global permanent filter unconditionally excludes any item with `price <= 0.0` or titles matching gift vouchers and discount coupons.
+
+### 3. Catalog Count & Variety Aggregation (`app/retrieval/retriever.py`)
+- Handles aggregation inquiries (e.g. `"كم نوع فول موجود"`) by scanning the catalog, pruning non-food categories (`appliances`, `electronics`, `baby care`), and categorizing genuine varieties:
+  * **فول مدمس معلب** (Plain, Tahini, Alexandrian, Cumin)
+  * **فول تدميس حب** (Whole dried beans for stewing)
+  * **فول مجروش** (Split beans for ta'ameya and falafel)
+- Word-boundary token matching eliminates false positives (e.g. corn flour or peanuts) from pure fava legume inquiries.
+
+### 4. Smart Cart Recipe Engine (`app/retrieval/recipe_engine.py`)
+- Automatically breaks down cooked dish requests (`"عايز اعمل مكرونة بشاميل"`) into essential store ingredients, retrieving matching in-stock grocery items for instant one-click cart building.
+
+---
+
 ## 🚀 Quick Start (Under 3 Minutes)
 
 ### 1. Prerequisites
@@ -66,7 +103,7 @@ Built over the real Spinneys retail catalog of **25,881 products**, the assistan
 ### 2. Setup Environment
 ```bash
 # Clone the repository
-git clone <repo_url> grocery_database
+git clone https://github.com/MohamedEzzat467/spinneys-ecommerce-ai-assistant.git grocery_database
 cd grocery_database
 
 # Create & activate virtual environment
@@ -86,7 +123,7 @@ Copy `.env.example` to `.env`:
 ```bash
 cp .env.example .env
 ```
-*(Optional: Add your `GROQ_API_KEY` for LLM-enhanced NLU. If omitted, the system falls back seamlessly to deterministic regex rules).*
+*(Configure `GROQ_API_KEY` for high-accuracy structured LLM parsing. If omitted, the engine falls back to deterministic regex rules).*
 
 ### 4. One-Command System Startup
 Run the unified startup script:
@@ -142,6 +179,7 @@ Results from the 60-query annotated benchmark dataset (`scripts/evaluate_retriev
 - **Catalog Scale**: 25,881 unique active products.
 - **Fast-path Latency Target**: Achieved < 40 ms average latency on filtered search queries.
 - **Stock Awareness**: 100% adherence to `in_stock: true` constraints.
+- **Voucher Exclusion Rate**: 100% (0.00 EGP non-purchasable junk purged).
 
 ---
 
@@ -193,11 +231,11 @@ See [`docs/live_demo_script.md`](docs/live_demo_script.md) for the complete turn
 ```
 grocery_database/
 ├── app/
-│   ├── core/           # Config, logging, shared text normalizer
-│   ├── nlu/            # Intent & filter parser (hybrid regex + compact LLM)
-│   ├── retrieval/      # Hybrid BM25 + dense vector retriever & RRF ranker
+│   ├── core/           # Config, logging, shared text normalizer & Groq client
+│   ├── nlu/            # Central controller, structured JSON parser & fallbacks
+│   ├── retrieval/      # Hybrid BM25 + dense vector retriever & recipe engine
 │   ├── state/          # Multi-turn in-memory session context manager
-│   └── main.py         # FastAPI application & REST endpoints
+│   └── main.py         # FastAPI application, routing, & REST endpoints
 ├── data/
 │   ├── retrieval_meta.parquet   # 25,881 product metadata records
 │   ├── retrieval_docs.parquet   # Searchable normalized product corpus
@@ -209,18 +247,19 @@ grocery_database/
 ├── scripts/
 │   ├── verify_acceptance_week6.py  # Automated 11-point acceptance test
 │   ├── evaluate_retrieval_week5.py # Retrieval benchmarking script
-│   └── evaluate_parser.py          # NLU accuracy & F1 benchmark
+│   ├── evaluate_parser.py          # NLU accuracy & F1 benchmark
+│   └── test_count_aggregation.py   # Aggregation & fava bean tests
 ├── docs/
 │   ├── live_demo_script.md         # 8-turn presentation walkthrough
 │   └── annotation_guide_w3.md      # Ground truth labeling guide
 ├── start_all.bat       # Windows one-command startup script
 ├── start_all.sh        # Linux/macOS one-command startup script
 ├── requirements.txt    # Project dependencies
-└── README.md           # This documentation
+└── README.md           # This comprehensive documentation
 ```
 
 ---
 
 ## 👥 Authors & Team
-Engineered for the **Spinneys Conversational AI Shopping Assistant Project**.
+Engineered for the **Spinneys Conversational AI Shopping Assistant Project**.  
 All rights reserved © 2026.
