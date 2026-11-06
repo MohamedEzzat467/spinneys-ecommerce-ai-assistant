@@ -477,6 +477,15 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
             overrides["qualifiers"] = nlu.qualifiers
         if nlu.attribute_focus:
             overrides["attribute_focus"] = nlu.attribute_focus
+        if nlu.excluded_brands:
+            overrides["excluded_brands"] = nlu.excluded_brands
+            overrides["exclude_brands"] = nlu.excluded_brands
+        if nlu.excluded_categories:
+            overrides["excluded_categories"] = nlu.excluded_categories
+        if nlu.excluded_terms:
+            overrides["excluded_terms"] = nlu.excluded_terms
+        if nlu.required_subtypes:
+            overrides["required_subtypes"] = nlu.required_subtypes
 
         retrieval_res = retriever.retrieve(
             query=target_query,
@@ -486,6 +495,10 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
             head_term=nlu.head_term,
             qualifiers=nlu.qualifiers,
             target_category=nlu.target_category,
+            excluded_brands=overrides.get("excluded_brands"),
+            excluded_categories=overrides.get("excluded_categories"),
+            excluded_terms=overrides.get("excluded_terms"),
+            required_subtypes=overrides.get("required_subtypes"),
         )
 
         matched_products = [
@@ -532,6 +545,10 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
                     head_term=nlu.head_term,
                     qualifiers=nlu.qualifiers,
                     target_category=nlu.target_category,
+                    excluded_brands=fallback_filters.get("excluded_brands"),
+                    excluded_categories=fallback_filters.get("excluded_categories"),
+                    excluded_terms=fallback_filters.get("excluded_terms"),
+                    required_subtypes=fallback_filters.get("required_subtypes"),
                 )
                 fallback_prods = [
                     p for p in fallback_res.get("products", [])
@@ -558,6 +575,8 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
                     filter_desc.append("المتوفر فقط")
                 suffix = f" مع فلاتر: {', '.join(filter_desc)}" if filter_desc else ""
                 reply = f"للأسف لم أجد منتجات تطابق بحثك عن '{target_query}'{suffix}."
+        elif count == 1:
+            reply = "وجدت لك 1 منتج فقط يناسب طلبك:"
         elif nlu.attribute_focus == "protein":
             reply = "إليك أبرز المنتجات عالية البروتين المتاحة في المتجر (مثل صدور الدواجن والتونة):"
         elif nlu.conversational_reply:

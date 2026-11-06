@@ -98,6 +98,12 @@ class NLUResult(BaseModel):
     is_followup: bool = False
     advisory_topic: Optional[str] = None
 
+    # Invariant 1 & 4: Negation and Subtype Constraints
+    excluded_brands: list[str] = Field(default_factory=list)
+    excluded_categories: list[str] = Field(default_factory=list)
+    excluded_terms: list[str] = Field(default_factory=list)
+    required_subtypes: list[str] = Field(default_factory=list)
+
     # Backward compatibility attributes & aliases
     query: Optional[str] = None
     brand: Optional[str] = None
@@ -404,6 +410,115 @@ def extract_head_term_and_qualifiers(clean_query: Optional[str]) -> tuple[Option
             target_cat = "Households"
 
     return canon_head, qualifiers, target_cat
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Invariant 1 & 4: Negation Engine & Essential Subtype Dictionaries
+# ─────────────────────────────────────────────────────────────────────────────
+
+NEGATION_SPLIT_RE = re.compile(
+    r"\b(?:مش\s+عاوز|مش\s+عايز|لا\s+اريد|لا\s+أريد|من\s+غير|ما\s+عدا|بدون|بلاش|إلا|الا|غير|مش|without|except|not|no)\b",
+    re.IGNORECASE,
+)
+
+ESSENTIAL_SUBTYPES: dict[str, list[str]] = {
+    "شوفان": ["شوفان", "الشوفان", "oat", "oats"],
+    "لوز": ["لوز", "اللوز", "almond", "almonds"],
+    "صويا": ["صويا", "الصويا", "soy", "soya"],
+    "جوز هند": ["جوز هند", "جوز الهند", "coconut"],
+    "رايب": ["رايب", "الرايب", "rayeb", "rayib"],
+    "بودرة": ["بودرة", "بودره", "البودرة", "البودره", "powder"],
+    "مكثف": ["مكثف", "المكثف", "condensed"],
+    "مبخر": ["مبخر", "المبخر", "evaporated"],
+    "خالي من اللاكتوز": ["خالي من اللاكتوز", "خال من اللاكتوز", "lactose free", "lactose-free"],
+    "منزوع الدسم": ["منزوع الدسم", "خالي الدسم", "خال من الدسم", "خالية الدسم", "skimmed"],
+    "دايت": ["دايت", "لايت", "diet", "light", "zero sugar", "زيرو سكر", "زيرو"],
+    "زيرو": ["زيرو", "zero"],
+    "اسباجيتي": ["اسباجيتي", "سباجيتي", "spaghetti"],
+    "قلم": ["قلم", "penne"],
+    "شعرية": ["شعرية", "شعيرية", "vermicelli"],
+}
+
+
+def extract_essential_subtypes(text: Optional[str]) -> list[str]:
+    """Identifies mandatory subtype modifiers (e.g. 'شوفان', 'لوز', 'اسباجيتي')."""
+    if not text:
+        return []
+    norm = normalize_text(text).lower()
+    detected: list[str] = []
+    for canon_sub, aliases in ESSENTIAL_SUBTYPES.items():
+        for alias in aliases:
+            pat = r"\b" + re.escape(normalize_text(alias)) + r"\b"
+            if re.search(pat, norm, flags=re.IGNORECASE):
+                if canon_sub not in detected:
+                    detected.append(canon_sub)
+                break
+    return detected
+
+
+def extract_negated_entities(text: Optional[str]) -> tuple[str, list[str], list[str], list[str]]:
+    """
+    Extracts explicit negation in Arabic / Egyptian dialect:
+      ['مش', 'من غير', 'بدون', 'الا', 'إلا', 'ما عدا', 'غير', 'بلاش', 'لا اريد', 'مش عاوز']
+    Returns:
+      (positive_text, excluded_brands, excluded_categories, excluded_terms)
+    Ensures negated entities are strictly isolated from positive filter slots.
+    """
+    if not text:
+        return "", [], [], []
+
+    excluded_brands: list[str] = []
+    excluded_categories: list[str] = []
+    excluded_terms: list[str] = []
+
+    matches = list(NEGATION_SPLIT_RE.finditer(text))
+    if not matches:
+        return text, excluded_brands, excluded_categories, excluded_terms
+
+    positive_parts: list[str] = []
+    last_end = 0
+
+    for m in matches:
+        pre = text[last_end:m.start()].strip()
+        if pre:
+            positive_parts.append(pre)
+
+        neg_span_start = m.end()
+        remainder = text[neg_span_start:]
+        clause_match = re.split(r"[,،.;\n]|\b(?:و|and)\s+(?!لا|مش|من\s+غير)", remainder)
+        neg_clause = clause_match[0].strip() if clause_match else remainder.strip()
+        last_end = neg_span_start + len(neg_clause)
+
+        neg_norm = normalize_text(neg_clause).strip()
+        # 1. Check if negated clause contains a known brand
+        b = find_known_brand(neg_clause) or find_known_brand(neg_norm)
+        if b:
+            canon_b = normalize_brand(b)
+            if canon_b not in excluded_brands:
+                excluded_brands.append(canon_b)
+            if b.lower() not in excluded_terms:
+                excluded_terms.append(b.lower())
+            if canon_b.lower() not in excluded_terms:
+                excluded_terms.append(canon_b.lower())
+
+        # 2. Extract negated words/tokens (e.g. ملح, حليب, سكر, زيت)
+        words = [w.strip() for w in neg_clause.split() if len(w.strip()) >= 2]
+        for w in words:
+            w_norm = normalize_text(w)
+            w_clean = w_norm[2:] if w_norm.startswith("ال") and len(w_norm) > 3 else w_norm
+            maybe_b = find_known_brand(w) or find_known_brand(w_norm)
+            if maybe_b:
+                cb = normalize_brand(maybe_b)
+                if cb not in excluded_brands:
+                    excluded_brands.append(cb)
+            if w_clean not in excluded_terms:
+                excluded_terms.append(w_clean)
+            if w not in excluded_terms:
+                excluded_terms.append(w)
+
+    clean_positive = " ".join(positive_parts).strip()
+    clean_positive = re.sub(r"\b(بس|ولكن|لكن|بسعر|فقط)\s*$", "", clean_positive, flags=re.IGNORECASE).strip()
+    return clean_positive, excluded_brands, excluded_categories, excluded_terms
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -859,6 +974,12 @@ def _rule_based_parse(raw_text: str, normalized: str) -> dict[str, Any]:
     in_stock: Optional[bool] = None
     sort: Optional[str] = None
 
+    # Invariant 1 & 4: Negation Engine & Essential Subtype Extraction
+    pos_text, ex_brands, ex_cats, ex_terms = extract_negated_entities(raw_text)
+    req_subtypes = extract_essential_subtypes(raw_text)
+    text_for_parsing = pos_text if pos_text else raw_text
+    norm_for_parsing = normalize_text(text_for_parsing)
+
     # 1. Check Brand Cancellation
     is_cancellation = bool(BRAND_CANCELLATION_RE.search(normalized))
     if is_cancellation:
@@ -866,11 +987,13 @@ def _rule_based_parse(raw_text: str, normalized: str) -> dict[str, Any]:
         follow_up_type = "cancellation"
         explicit_fields.append("brand")
     else:
-        # Check explicit brand
-        detected_brand = find_known_brand(raw_text) or find_known_brand(normalized)
+        # Check explicit brand (strictly from positive text)
+        detected_brand = find_known_brand(text_for_parsing) or find_known_brand(norm_for_parsing)
         if detected_brand:
-            brand = normalize_brand(detected_brand)
-            explicit_fields.append("brand")
+            canon_b = normalize_brand(detected_brand)
+            if canon_b not in ex_brands:
+                brand = canon_b
+                explicit_fields.append("brand")
 
     # 2. Check Price ranges
     p_between = PRICE_BETWEEN_RE.search(normalized)
@@ -909,8 +1032,13 @@ def _rule_based_parse(raw_text: str, normalized: str) -> dict[str, Any]:
     if REFERENCE_RE.search(normalized):
         follow_up_type = "reference"
 
-    # Query extraction
-    query = _clean_query_string(raw_text, brand, unsupported_filters)
+    # Query extraction (strictly from positive text)
+    query = _clean_query_string(text_for_parsing, brand, unsupported_filters)
+    if query and ex_terms:
+        for et in ex_terms:
+            query = re.sub(r"\b" + re.escape(et) + r"\b", " ", query, flags=re.IGNORECASE)
+        query = re.sub(r"\s+", " ", query).strip()
+        query = query if len(query) >= 2 else None
 
     # Healthy / Diet intent detection
     healthy_kw_match = bool(
@@ -999,6 +1127,10 @@ def _rule_based_parse(raw_text: str, normalized: str) -> dict[str, Any]:
         "sort": sort,
         "explicit_fields": sorted(list(explicit)),
         "unsupported_filters": unsupported_filters,
+        "excluded_brands": ex_brands,
+        "excluded_categories": ex_cats,
+        "excluded_terms": ex_terms,
+        "required_subtypes": req_subtypes,
     }
 
 
@@ -1257,6 +1389,12 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
         if p_min:
             price_min = float(p_min.group(1))
 
+    # Invariant 1 & 4: Negation Engine & Essential Subtype Extraction
+    pos_text, ex_brands, ex_cats, ex_terms = extract_negated_entities(raw_text)
+    req_subtypes = extract_essential_subtypes(raw_text)
+    text_for_parsing = pos_text if pos_text else raw_text
+    norm_for_parsing = normalize_text(text_for_parsing)
+
     # In-stock
     in_stock = None
     if STOCK_IN_RE.search(normalized):
@@ -1264,12 +1402,16 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
     elif STOCK_OUT_RE.search(normalized):
         in_stock = False
 
-    # Brand
-    detected_brand = find_known_brand(raw_text) or find_known_brand(normalized)
-    brand = normalize_brand(detected_brand) if detected_brand else None
+    # Brand (strictly from positive text, never from negated text)
+    detected_brand = find_known_brand(text_for_parsing) or find_known_brand(norm_for_parsing)
+    brand = None
+    if detected_brand:
+        canon_b = normalize_brand(detected_brand)
+        if canon_b not in ex_brands:
+            brand = canon_b
 
-    # Clean product query extraction
-    cleaned = sanitize_query(raw_text)
+    # Clean product query extraction (using positive text)
+    cleaned = sanitize_query(text_for_parsing)
     cleaned = SORT_DESC_RE.sub(" ", cleaned)
     cleaned = SORT_ASC_RE.sub(" ", cleaned)
     cleaned = PRICE_BETWEEN_RE.sub(" ", cleaned)
@@ -1361,6 +1503,10 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
         "in_stock": in_stock,
         "explicit_fields": explicit_fields,
         "unsupported_filters": _extract_unsupported_filters(normalized),
+        "excluded_brands": ex_brands,
+        "excluded_categories": ex_cats,
+        "excluded_terms": ex_terms,
+        "required_subtypes": req_subtypes,
     }
 
 
@@ -1376,6 +1522,8 @@ def parse_query(
     """
     t0 = time.perf_counter()
     normalized = normalize_text(raw_text)
+    det_pos, det_ex_brands, det_ex_cats, det_ex_terms = extract_negated_entities(raw_text)
+    det_subtypes = extract_essential_subtypes(raw_text)
     llm = get_llm_client()
 
     if llm.is_available:
@@ -1526,14 +1674,36 @@ def parse_query(
                         "total_tokens": resp.usage.total_tokens,
                     }
 
+                # Enforce Invariant 1 (Negation) and Invariant 4 (Subtypes)
+                all_ex_brands = list(set((content.get("excluded_brands") or []) + det_ex_brands))
+                all_ex_terms = list(set((content.get("excluded_terms") or []) + det_ex_terms))
+                all_subtypes = list(set((content.get("required_subtypes") or []) + det_subtypes))
+
+                content["excluded_brands"] = all_ex_brands
+                content["excluded_categories"] = det_ex_cats
+                content["excluded_terms"] = all_ex_terms
+                content["required_subtypes"] = all_subtypes
+
                 # Canonicalize brand and strip from clean_query to prevent brand collision
-                extracted_brand = content.get("brand") or find_known_brand(raw_text) or find_known_brand(content.get("clean_query") or "")
+                extracted_brand = content.get("brand") or find_known_brand(det_pos or raw_text) or find_known_brand(content.get("clean_query") or "")
                 if extracted_brand:
                     canonical_brand = normalize_brand(extracted_brand)
-                    content["brand"] = canonical_brand
-                    if content.get("clean_query"):
-                        stripped_cq = strip_brand_from_query(content["clean_query"], canonical_brand)
-                        content["clean_query"] = stripped_cq if stripped_cq and len(stripped_cq) >= 2 else None
+                    if canonical_brand in all_ex_brands:
+                        content["brand"] = None
+                    else:
+                        content["brand"] = canonical_brand
+                        if content.get("clean_query"):
+                            stripped_cq = strip_brand_from_query(content["clean_query"], canonical_brand)
+                            content["clean_query"] = stripped_cq if stripped_cq and len(stripped_cq) >= 2 else None
+                elif content.get("brand") and content["brand"] in all_ex_brands:
+                    content["brand"] = None
+
+                # Ensure excluded terms are not in clean_query
+                if content.get("clean_query") and all_ex_terms:
+                    cq_raw = content["clean_query"]
+                    for et in all_ex_terms:
+                        cq_raw = re.sub(r"\b" + re.escape(et) + r"\b", " ", cq_raw, flags=re.IGNORECASE)
+                    content["clean_query"] = sanitize_query(cq_raw)
 
                 # Normalize and ensure head_term, qualifiers, target_category
                 cq = content.get("clean_query")

@@ -21,12 +21,21 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 
+INCREMENTAL_REFINEMENT_RE = re.compile(
+    r"\b(ارخص|أرخص|اغلى|أغلى|اقل|أقل|اكتر|أكثر|تحت|فوق|تاني|تانية|ثاني|ثانية|الماركة التانية|ماركة تانية|"
+    r"رتبهم|رتب|بالسعر|سعر|منهم|فيهم|الاول|الأول|التاني|الثاني|الاخير|الأخير|بدون|مش عايز|بلاش|من غير|"
+    r"cheaper|more expensive|less than|under|above|sort|second one|first one)\b",
+    re.IGNORECASE,
+)
+
+
 @dataclass
 class SessionState:
     """Represents the multi-turn conversational state of a single customer session."""
 
     session_id: str
     query: Optional[str] = None
+    head_term: Optional[str] = None
     brand: Optional[str] = None
     category: Optional[str] = None
     price_min: Optional[float] = None
@@ -34,6 +43,10 @@ class SessionState:
     in_stock: Optional[bool] = None
     sort: Optional[str] = None
     unsupported_filters: list[str] = field(default_factory=list)
+    excluded_brands: list[str] = field(default_factory=list)
+    excluded_categories: list[str] = field(default_factory=list)
+    excluded_terms: list[str] = field(default_factory=list)
+    required_subtypes: list[str] = field(default_factory=list)
     last_results: list[dict[str, Any]] = field(default_factory=list)
     history: list[dict[str, str]] = field(default_factory=list)
     turn_count: int = 0
@@ -61,11 +74,23 @@ class SessionState:
             filters["in_stock"] = self.in_stock
         if self.sort is not None:
             filters["sort"] = self.sort
+        if self.head_term is not None:
+            filters["head_term"] = self.head_term
+        if self.excluded_brands:
+            filters["excluded_brands"] = list(self.excluded_brands)
+            filters["exclude_brands"] = list(self.excluded_brands)
+        if self.excluded_categories:
+            filters["excluded_categories"] = list(self.excluded_categories)
+        if self.excluded_terms:
+            filters["excluded_terms"] = list(self.excluded_terms)
+        if self.required_subtypes:
+            filters["required_subtypes"] = list(self.required_subtypes)
         return filters
 
     def reset(self) -> None:
-        """Resets all filters for a new exploration topic."""
+        """Resets all transient filters for a new exploration topic."""
         self.query = None
+        self.head_term = None
         self.brand = None
         self.category = None
         self.price_min = None
@@ -73,6 +98,10 @@ class SessionState:
         self.in_stock = None
         self.sort = None
         self.unsupported_filters = []
+        self.excluded_brands = []
+        self.excluded_categories = []
+        self.excluded_terms = []
+        self.required_subtypes = []
 
 
 class SessionManager:
@@ -103,16 +132,31 @@ class SessionManager:
         state.turn_count += 1
         follow_up = getattr(nlu_result, "follow_up_type", "new_topic")
         intent = getattr(nlu_result, "intent", "search")
+        action = getattr(nlu_result, "action", "search")
+        raw_text = getattr(nlu_result, "raw_text", "")
+        nlu_head = getattr(nlu_result, "head_term", None)
+        q_val = getattr(nlu_result, "clean_query", None) or getattr(nlu_result, "query", None)
 
-        if intent == "advisory":
+        if intent == "advisory" or action == "advisory_qa":
             # Retain all active constraints and product list for advisory dialogue
             return state
 
+        # Invariant 5: Stateless Context Transition & Intent Cleaning
+        is_recipe_intent = (intent == "recipe" or action == "recipe")
+        is_head_term_changed = bool(state.head_term and nlu_head and nlu_head != state.head_term)
+        is_explicit_refine = bool(INCREMENTAL_REFINEMENT_RE.search(raw_text))
+
+        # If user switches to a recipe, changes primary product noun, or enters an independent search:
+        # IMMEDIATELY PURGE all prior transient filters!
+        if is_recipe_intent or is_head_term_changed or (follow_up == "refinement" and not is_explicit_refine and q_val):
+            follow_up = "new_topic"
+
         if follow_up == "new_topic":
             state.reset()
-            q_val = getattr(nlu_result, "clean_query", None) or getattr(nlu_result, "query", None)
             if q_val:
                 state.query = q_val
+            if nlu_head:
+                state.head_term = nlu_head
             if getattr(nlu_result, "brand", None):
                 state.brand = nlu_result.brand
             if getattr(nlu_result, "category", None):
@@ -130,12 +174,21 @@ class SessionManager:
                 state.sort = s_val
             if getattr(nlu_result, "unsupported_filters", None):
                 state.unsupported_filters = list(nlu_result.unsupported_filters)
+            if getattr(nlu_result, "excluded_brands", None):
+                state.excluded_brands = list(nlu_result.excluded_brands)
+            if getattr(nlu_result, "excluded_categories", None):
+                state.excluded_categories = list(nlu_result.excluded_categories)
+            if getattr(nlu_result, "excluded_terms", None):
+                state.excluded_terms = list(nlu_result.excluded_terms)
+            if getattr(nlu_result, "required_subtypes", None):
+                state.required_subtypes = list(nlu_result.required_subtypes)
 
         elif follow_up == "refinement":
             # Keep previous query if no new query specified
-            q_val = getattr(nlu_result, "clean_query", None) or getattr(nlu_result, "query", None)
             if q_val:
                 state.query = q_val
+            if nlu_head:
+                state.head_term = nlu_head
 
             # Update constraints if explicitly mentioned in this turn
             if getattr(nlu_result, "brand", None):
@@ -154,10 +207,21 @@ class SessionManager:
             if s_val:
                 state.sort = s_val
             if getattr(nlu_result, "unsupported_filters", None):
-                # Union unsupported filters
                 for item in nlu_result.unsupported_filters:
                     if item not in state.unsupported_filters:
                         state.unsupported_filters.append(item)
+            if getattr(nlu_result, "excluded_brands", None):
+                for eb in nlu_result.excluded_brands:
+                    if eb not in state.excluded_brands:
+                        state.excluded_brands.append(eb)
+            if getattr(nlu_result, "excluded_terms", None):
+                for et in nlu_result.excluded_terms:
+                    if et not in state.excluded_terms:
+                        state.excluded_terms.append(et)
+            if getattr(nlu_result, "required_subtypes", None):
+                for rs in nlu_result.required_subtypes:
+                    if rs not in state.required_subtypes:
+                        state.required_subtypes.append(rs)
 
         elif follow_up == "cancellation":
             # User explicitly removed or cancelled a constraint (e.g. "أي ماركة مش فارق معايا")

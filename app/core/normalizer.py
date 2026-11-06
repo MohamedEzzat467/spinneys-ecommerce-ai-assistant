@@ -220,6 +220,10 @@ BRAND_NORMALIZATION: dict[str, str] = {
     "master":                   "Master",
     "ماستر":                    "Master",
 
+    # Crystal
+    "crystal":                  "Crystal",
+    "كريستال":                  "Crystal",
+
     # Regina
     "regina":                   "Regina",
     "ريجينا":                   "Regina",

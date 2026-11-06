@@ -40,7 +40,9 @@ from app.core.normalizer import (
     normalize_text,
 )
 from app.nlu.parser import (
+    extract_essential_subtypes,
     extract_head_term_and_qualifiers,
+    extract_negated_entities,
     get_head_term_variants,
     parse_query as nlu_parse_query,
     sanitize_query,
@@ -168,6 +170,8 @@ COMMODITY_PRIMARY_CATEGORIES: dict[str, tuple[str, ...]] = {
     "شوكولاتة": ("sweets & snacks", "chocolate", "confectionery", "grocery", "top selling products", "online deals"),
     "شيكولاتة": ("sweets & snacks", "chocolate", "confectionery", "grocery", "top selling products", "online deals"),
     "فراولة": ("fresh fruits & vegetables", "produce", "frozen food", "grocery"),
+    "مكرونة": ("grocery", "pasta", "top selling products", "general", "online deals"),
+    "مكرونه": ("grocery", "pasta", "top selling products", "general", "online deals"),
 }
 
 COMMODITY_FORBIDDEN_CATEGORIES: dict[str, set[str]] = {
@@ -180,6 +184,14 @@ COMMODITY_FORBIDDEN_CATEGORIES: dict[str, set[str]] = {
         "beauty & personal care", "hair care", "face & body skincare", "baby care",
         "electronics", "households", "cleaning products", "fashion & textiles",
         "sweets & snacks", "biscuits", "seafood & fish", "canned food",
+    },
+    "مكرونة": {
+        "seafood & fish", "fish & seafood", "seafood", "fish",
+        "beauty & personal care", "households", "cleaning products", "electronics",
+    },
+    "مكرونه": {
+        "seafood & fish", "fish & seafood", "seafood", "fish",
+        "beauty & personal care", "households", "cleaning products", "electronics",
     },
     "حليب": {
         "sweets & snacks", "biscuits", "chocolate", "confectionery",
@@ -255,6 +267,30 @@ COMMODITY_FORBIDDEN_HEAD_NOUNS: dict[str, set[str]] = {
     "فراولة": {
         "زبادي", "لبن", "حليب", "عصير", "مشروب", "شوكولاتة", "بسكويت", "ويفر", "جيلي", "ايس كريم",
     },
+    "مكرونة": {
+        "سمك", "مصفاة", "مصفاه", "ملعقة", "مغرفة", "بيدريني", "تيتز", "ايميدج", "بلدي",
+    },
+    "مكرونه": {
+        "سمك", "مصفاة", "مصفاه", "ملعقة", "مغرفة", "بيدريني", "تيتز", "ايميدج", "بلدي",
+    },
+}
+
+ESSENTIAL_SUBTYPES: dict[str, list[str]] = {
+    "شوفان": ["شوفان", "الشوفان", "oat", "oats"],
+    "لوز": ["لوز", "اللوز", "almond", "almonds"],
+    "صويا": ["صويا", "الصويا", "soy", "soya"],
+    "جوز هند": ["جوز هند", "جوز الهند", "coconut"],
+    "رايب": ["رايب", "الرايب", "rayeb", "rayib"],
+    "بودرة": ["بودرة", "بودره", "البودرة", "البودره", "powder"],
+    "مكثف": ["مكثف", "المكثف", "condensed"],
+    "مبخر": ["مبخر", "المبخر", "evaporated"],
+    "خالي من اللاكتوز": ["خالي من اللاكتوز", "خال من اللاكتوز", "lactose free", "lactose-free"],
+    "منزوع الدسم": ["منزوع الدسم", "خالي الدسم", "خال من الدسم", "خالية الدسم", "skimmed"],
+    "دايت": ["دايت", "لايت", "diet", "light", "zero sugar", "زيرو سكر", "زيرو"],
+    "زيرو": ["زيرو", "zero"],
+    "اسباجيتي": ["اسباجيتي", "سباجيتي", "spaghetti"],
+    "قلم": ["قلم", "penne"],
+    "شعرية": ["شعرية", "شعيرية", "vermicelli"],
 }
 
 
@@ -357,15 +393,65 @@ def is_disqualified_commodity_candidate(
     head_term: Optional[str],
     head_variants: set[str],
     explicit_keyword: Optional[str] = None,
+    excluded_brands: Optional[list[str]] = None,
+    excluded_terms: Optional[list[str]] = None,
+    required_subtypes: Optional[list[str]] = None,
 ) -> bool:
     """
     Checks if a candidate is disqualified based on:
-      1. Conflicting category taxonomy (e.g. seafood or cosmetics for cooking oil).
-      2. Conflicting head noun (e.g. 'ماكريل', 'تونة' for 'زيت'; 'شوكولاتة' for 'حليب').
-      3. Prepositional modifier only (e.g. 'في زيت', 'بالحليب').
+      1. Excluded brands or excluded terms (Arabic negation engine).
+      2. Missing mandatory required subtypes (e.g. oat milk requiring oat).
+      3. Conflicting category taxonomy (e.g. seafood or cosmetics for cooking oil or pasta).
+      4. Conflicting head noun (e.g. 'ماكريل', 'تونة' for 'زيت'; 'شوكولاتة' for 'حليب'; 'سمك' for 'مكرونة').
+      5. Prepositional modifier only (e.g. 'في زيت', 'بالحليب').
     """
-    if not rec or not head_term:
+    if not rec:
         return False
+
+    p_nar = normalize_text(str(rec.get("name_ar", "")))
+    p_nen = str(rec.get("name_en", "")).lower()
+    p_brand = str(rec.get("brand", "")).strip().lower()
+    combined_name = f"{p_nar} {p_nen}"
+
+    # 1. Invariant 1: Excluded Brands Check
+    if excluded_brands:
+        for eb in excluded_brands:
+            if not eb:
+                continue
+            eb_norm = normalize_brand(eb).strip().lower()
+            if p_brand == eb_norm or eb.strip().lower() in p_brand:
+                return True
+            if eb_norm in combined_name or normalize_text(eb).strip().lower() in combined_name:
+                return True
+
+    # 2. Invariant 1: Excluded Terms Check
+    if excluded_terms:
+        title_tokens = set(re.findall(r"\b[a-zA-Z0-9_\u0600-\u06FF]+\b", combined_name))
+        for et in excluded_terms:
+            if not et:
+                continue
+            et_norm = normalize_text(et).strip().lower()
+            if et_norm in title_tokens or et.lower() in title_tokens:
+                return True
+            if et_norm.startswith("ال") and len(et_norm) > 3 and et_norm[2:] in title_tokens:
+                return True
+
+    # 3. Invariant 4: Required Subtypes Enforcement
+    if required_subtypes:
+        for st in required_subtypes:
+            st_aliases = ESSENTIAL_SUBTYPES.get(st, [st])
+            has_sub = False
+            for alias in st_aliases:
+                a_norm = normalize_text(alias).lower()
+                if re.search(r"\b" + re.escape(a_norm) + r"\b", combined_name, flags=re.IGNORECASE):
+                    has_sub = True
+                    break
+            if not has_sub:
+                return True
+
+    if not head_term:
+        return False
+
     norm_ht = normalize_text(head_term).strip().lower()
     ht_clean = norm_ht[2:] if norm_ht.startswith("ال") and len(norm_ht) > 3 else norm_ht
 
@@ -376,26 +462,26 @@ def is_disqualified_commodity_candidate(
             return False
         if ht_clean in ("حليب", "لبن") and any(k in norm_kw for k in ("شوكولاتة", "شيكولاتة", "بسكويت", "كيك", "سمن")):
             return False
+        if ht_clean in ("مكرونة", "مكرونه") and any(k in norm_kw for k in ("سمك", "اسماك", "أسماك", "سي فود", "سيفود", "بحريات")):
+            return False
 
-    # 1. Category taxonomy alignment check
+    # 4. Invariant 3: Category taxonomy alignment check
     cat_lower = str(rec.get("category", "")).strip().lower()
     forb_cats = COMMODITY_FORBIDDEN_CATEGORIES.get(ht_clean) or COMMODITY_FORBIDDEN_CATEGORIES.get(norm_ht)
     if forb_cats and cat_lower in forb_cats:
         return True
 
-    # 2. Conflicting primary head noun check
+    # 5. Conflicting primary head noun check
     forb_heads = COMMODITY_FORBIDDEN_HEAD_NOUNS.get(ht_clean) or COMMODITY_FORBIDDEN_HEAD_NOUNS.get(norm_ht)
     if forb_heads:
-        p_nar = normalize_text(str(rec.get("name_ar", "")))
-        p_nen = str(rec.get("name_en", "")).lower()
-        title_words = re.findall(r"\b[a-zA-Z0-9_\u0600-\u06FF]+\b", f"{p_nar} {p_nen}")
+        title_words = re.findall(r"\b[a-zA-Z0-9_\u0600-\u06FF]+\b", combined_name)
         for w in title_words:
             w_norm = normalize_text(w)
             w_clean = w_norm[2:] if w_norm.startswith("ال") and len(w_norm) > 3 else w_norm
             if w in forb_heads or w_norm in forb_heads or w_clean in forb_heads:
                 return True
 
-    # 3. Prepositional modifier only check
+    # 6. Invariant 2: Prepositional modifier only check
     if is_prepositional_modifier_only(rec.get("name_ar", ""), rec.get("name_en", ""), head_term):
         return True
 
@@ -545,6 +631,29 @@ class ProductRetriever:
                     content["brand"] = normalize_brand(content["brand"])
                 if content.get("exclude_brands"):
                     content["exclude_brands"] = [normalize_brand(b) for b in content["exclude_brands"]]
+
+                # Deterministically merge negation and subtypes
+                det_nlu = nlu_parse_query(query)
+                if det_nlu.excluded_brands:
+                    eb_set = set(content.get("exclude_brands", [])) | set(det_nlu.excluded_brands)
+                    content["exclude_brands"] = [normalize_brand(b) for b in eb_set]
+                    content["excluded_brands"] = content["exclude_brands"]
+                if det_nlu.excluded_categories:
+                    content["excluded_categories"] = list(set(content.get("excluded_categories", [])) | set(det_nlu.excluded_categories))
+                if det_nlu.excluded_terms:
+                    content["excluded_terms"] = list(set(content.get("excluded_terms", [])) | set(det_nlu.excluded_terms))
+                if det_nlu.required_subtypes:
+                    content["required_subtypes"] = list(set(content.get("required_subtypes", [])) | set(det_nlu.required_subtypes))
+                if det_nlu.head_term and not content.get("head_term"):
+                    content["head_term"] = det_nlu.head_term
+                if det_nlu.qualifiers and not content.get("qualifiers"):
+                    content["qualifiers"] = det_nlu.qualifiers
+
+                # Invariant 1: Ensure excluded brand is stripped from positive brand slot
+                ex_b_set = {normalize_brand(b).lower() for b in content.get("exclude_brands", [])}
+                if content.get("brand") and normalize_brand(content["brand"]).lower() in ex_b_set:
+                    content["brand"] = None
+
                 return content
         except Exception as exc:
             log.warning("LLM arbitration failed: %s", exc)
@@ -557,8 +666,15 @@ class ProductRetriever:
         filters: dict[str, Any] = {
             "query": nlu.query,
             "brand": nlu.brand,
-            "exclude_brands": [],
+            "exclude_brands": list(nlu.excluded_brands or []),
+            "excluded_brands": list(nlu.excluded_brands or []),
+            "excluded_categories": list(nlu.excluded_categories or []),
+            "excluded_terms": list(nlu.excluded_terms or []),
+            "required_subtypes": list(nlu.required_subtypes or []),
             "category": nlu.category,
+            "target_category": nlu.target_category,
+            "head_term": nlu.head_term,
+            "qualifiers": nlu.qualifiers,
             "min_price": nlu.price_min,
             "max_price": nlu.price_max,
             "in_stock": nlu.in_stock,
@@ -569,15 +685,15 @@ class ProductRetriever:
         m = NEGATION_RE.search(query)
         if m:
             negated_term = m.group(2)
-            # Check if negated term is a known brand
             detected = find_known_brand(negated_term)
             if detected:
-                filters["exclude_brands"].append(normalize_brand(detected))
-                # If the brand was mistakenly assigned as positive brand, clear it
-                if filters["brand"] == normalize_brand(detected):
+                cb = normalize_brand(detected)
+                if cb not in filters["exclude_brands"]:
+                    filters["exclude_brands"].append(cb)
+                    filters["excluded_brands"].append(cb)
+                if filters["brand"] == cb:
                     filters["brand"] = None
 
-            # Remove negation clause from core search query
             cleaned_q = NEGATION_RE.sub(" ", query)
             cleaned_q = re.sub(r"\b(بس|فقط|only|just|please)\b", " ", cleaned_q, flags=re.IGNORECASE)
             cleaned_q = re.sub(r"\s+", " ", cleaned_q).strip()
@@ -596,6 +712,10 @@ class ProductRetriever:
         head_term: Optional[str] = None,
         qualifiers: Optional[list[str]] = None,
         target_category: Optional[str] = None,
+        excluded_brands: Optional[list[str]] = None,
+        excluded_categories: Optional[list[str]] = None,
+        excluded_terms: Optional[list[str]] = None,
+        required_subtypes: Optional[list[str]] = None,
     ) -> dict[str, Any]:
         """
         Main retrieval method:
@@ -652,7 +772,11 @@ class ProductRetriever:
             filters = {
                 "query": nlu.query,
                 "brand": nlu.brand,
-                "exclude_brands": [],
+                "exclude_brands": list(nlu.excluded_brands or []),
+                "excluded_brands": list(nlu.excluded_brands or []),
+                "excluded_categories": list(nlu.excluded_categories or []),
+                "excluded_terms": list(nlu.excluded_terms or []),
+                "required_subtypes": list(nlu.required_subtypes or []),
                 "category": nlu.category,
                 "target_category": nlu.target_category,
                 "head_term": nlu.head_term,
@@ -671,7 +795,10 @@ class ProductRetriever:
         qualifiers = qualifiers if qualifiers is not None else filters.get("qualifiers", [])
         target_category = target_category or filters.get("target_category") or filters.get("category")
         brand = filters.get("brand")
-        exclude_brands = filters.get("exclude_brands", [])
+        exclude_brands = excluded_brands or filters.get("excluded_brands") or filters.get("exclude_brands", [])
+        excluded_categories = excluded_categories or filters.get("excluded_categories", [])
+        excluded_terms = excluded_terms or filters.get("excluded_terms", [])
+        required_subtypes = required_subtypes or filters.get("required_subtypes", [])
         category = filters.get("category")
         min_price = filters.get("min_price")
         max_price = filters.get("max_price")
@@ -689,6 +816,12 @@ class ProductRetriever:
                 qualifiers = inferred_quals
             if not target_category:
                 target_category = inferred_cat
+
+        # Infer required subtypes if not set
+        if not required_subtypes:
+            required_subtypes = extract_essential_subtypes(query)
+            if not required_subtypes and keyword:
+                required_subtypes = extract_essential_subtypes(keyword)
 
         # Step 2: In-Memory Fast Filtering (Vectorized Numpy / Pandas)
         df = self.df_meta
@@ -721,11 +854,62 @@ class ProductRetriever:
                 if stripped_kw:
                     keyword = stripped_kw
 
-        # 2. Exclude brands
+        # 2. Exclude brands (Invariant 1)
         if exclude_brands:
-            ex_set = {b.strip().lower() for b in exclude_brands if b}
+            ex_set = set()
+            for b in exclude_brands:
+                if not b:
+                    continue
+                canon_b = normalize_brand(b).strip().lower()
+                raw_b = b.strip().lower()
+                norm_b = normalize_text(b).strip().lower()
+                ex_set.update({canon_b, raw_b, norm_b})
+                for alias, canon in BRAND_NORMALIZATION.items():
+                    if canon.strip().lower() == canon_b:
+                        ex_set.add(alias.strip().lower())
+                        ex_set.add(normalize_text(alias).strip().lower())
             if ex_set:
                 mask &= (~df["_brand_lower"].isin(ex_set))
+                for eb in ex_set:
+                    if len(eb) >= 3:
+                        mask &= (~df["name_ar"].str.contains(re.escape(eb), case=False, na=False))
+                        mask &= (~df["name_en"].str.contains(re.escape(eb), case=False, na=False))
+
+        # 2b. Exclude categories (Invariant 1)
+        if excluded_categories:
+            ex_cat_set = {c.strip().lower() for c in excluded_categories if c}
+            if ex_cat_set:
+                mask &= (~df["_category_lower"].isin(ex_cat_set))
+
+        # 2c. Exclude terms (Invariant 1)
+        if excluded_terms:
+            for et in excluded_terms:
+                if not et or len(et.strip()) < 2:
+                    continue
+                et_esc = re.escape(normalize_text(et).strip().lower())
+                safe_pat = rf"(?<!بدون\s)(?<!خالي\sمن\s)(?<!خال\sمن\s)(?<!من\sغير\s){et_esc}"
+                mask &= (~df["name_ar"].str.contains(safe_pat, case=False, regex=True, na=False))
+                mask &= (~df["name_en"].str.contains(re.escape(et.strip().lower()), case=False, na=False))
+
+        # 2d. Invariant 4: Required Subtypes Enforcement
+        if required_subtypes:
+            for st in required_subtypes:
+                st_aliases = ESSENTIAL_SUBTYPES.get(st, [st])
+                sub_pattern = "|".join(re.escape(normalize_text(a).lower()) for a in st_aliases)
+                sub_mask = (
+                    df["name_ar"].str.contains(sub_pattern, case=False, regex=True, na=False)
+                    | df["name_en"].str.contains(sub_pattern, case=False, regex=True, na=False)
+                )
+                mask &= sub_mask
+
+        # 2e. Invariant 3: Pasta Homonym Disambiguation
+        is_pasta_query = (head_term in ("مكرونة", "مكرونه")) or bool(re.search(r"\b(مكرونة|مكرونه|pasta|spaghetti|penne)\b", norm_q, re.IGNORECASE))
+        is_explicit_seafood = any(w in norm_q.lower() for w in ("سمك", "اسماك", "أسماك", "سي فود", "سيفود", "بحريات", "fish", "seafood"))
+        if is_pasta_query and not is_explicit_seafood:
+            mask &= (~df["_category_lower"].isin({"seafood & fish", "fish & seafood", "seafood", "fish"}))
+            mask &= (~df["_category_lower"].isin(NON_FOOD_CATEGORIES))
+            pasta_junk_pat = r"سمك|بلدي|بلدى|مصفاة|مصفاه|ملعقة|مغرفة|طقم|بيدريني|تيتز|ايميدج"
+            mask &= (~df["name_ar"].str.contains(pasta_junk_pat, regex=True, na=False))
 
         # 3. Category filter: only apply strict hard mask if explicitly requested in filter_overrides
         explicit_cat = filter_overrides.get("category") if filter_overrides else None
@@ -893,7 +1077,15 @@ class ProductRetriever:
             # 1. Mandatory Head-Term Filter & Disqualification Check
             if head_variants and not _has_head_term_match(p_rec):
                 return -1000.0
-            if is_disqualified_commodity_candidate(p_rec, head_term, head_variants, keyword):
+            if is_disqualified_commodity_candidate(
+                p_rec,
+                head_term,
+                head_variants,
+                keyword,
+                excluded_brands=exclude_brands,
+                excluded_terms=excluded_terms,
+                required_subtypes=required_subtypes,
+            ):
                 return -1000.0
 
             # 2. Qualifiers match boosting (+30.0 for matching qualifier token)
@@ -973,7 +1165,15 @@ class ProductRetriever:
                             continue
                         if head_variants and not _has_head_term_match(p_rec):
                             continue
-                        if is_disqualified_commodity_candidate(p_rec, head_term, head_variants, keyword):
+                        if is_disqualified_commodity_candidate(
+                            p_rec,
+                            head_term,
+                            head_variants,
+                            keyword,
+                            excluded_brands=exclude_brands,
+                            excluded_terms=excluded_terms,
+                            required_subtypes=required_subtypes,
+                        ):
                             continue
                         avail = p_rec["availability"]
                         p_name = normalize_text(str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower()
@@ -1000,7 +1200,15 @@ class ProductRetriever:
                             continue
                         if head_variants and not _has_head_term_match(p_rec):
                             continue
-                        if is_disqualified_commodity_candidate(p_rec, head_term, head_variants, keyword):
+                        if is_disqualified_commodity_candidate(
+                            p_rec,
+                            head_term,
+                            head_variants,
+                            keyword,
+                            excluded_brands=exclude_brands,
+                            excluded_terms=excluded_terms,
+                            required_subtypes=required_subtypes,
+                        ):
                             continue
                         avail = p_rec["availability"]
                         p_name = normalize_text(str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower()
@@ -1027,7 +1235,15 @@ class ProductRetriever:
                             continue
                         if head_variants and not _has_head_term_match(p_rec):
                             continue
-                        if is_disqualified_commodity_candidate(p_rec, head_term, head_variants, keyword):
+                        if is_disqualified_commodity_candidate(
+                            p_rec,
+                            head_term,
+                            head_variants,
+                            keyword,
+                            excluded_brands=exclude_brands,
+                            excluded_terms=excluded_terms,
+                            required_subtypes=required_subtypes,
+                        ):
                             continue
                         avail = p_rec["availability"]
                         p_name = normalize_text(str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower()
@@ -1047,7 +1263,15 @@ class ProductRetriever:
                 valid_cand_pids = [
                     pid for pid in candidate_df["product_id"].to_list()
                     if _has_head_term_match(self.products_by_id.get(pid))
-                    and not is_disqualified_commodity_candidate(self.products_by_id.get(pid), head_term, head_variants, keyword)
+                    and not is_disqualified_commodity_candidate(
+                        self.products_by_id.get(pid),
+                        head_term,
+                        head_variants,
+                        keyword,
+                        excluded_brands=exclude_brands,
+                        excluded_terms=excluded_terms,
+                        required_subtypes=required_subtypes,
+                    )
                 ]
                 candidate_df = candidate_df[candidate_df["product_id"].isin(valid_cand_pids)]
             # Sort candidate_df
@@ -1073,7 +1297,15 @@ class ProductRetriever:
             if sort_order in ("price_asc", "price_desc"):
                 valid_pids = [
                     pid for pid in ranked_product_ids
-                    if not is_disqualified_commodity_candidate(self.products_by_id.get(pid), head_term, head_variants, keyword)
+                    if not is_disqualified_commodity_candidate(
+                        self.products_by_id.get(pid),
+                        head_term,
+                        head_variants,
+                        keyword,
+                        excluded_brands=exclude_brands,
+                        excluded_terms=excluded_terms,
+                        required_subtypes=required_subtypes,
+                    )
                 ]
                 matched_subset = candidate_df[candidate_df["product_id"].isin(valid_pids)]
                 is_asc = (sort_order == "price_asc")
@@ -1090,7 +1322,15 @@ class ProductRetriever:
             rec = self.products_by_id.get(pid)
             if not rec or float(rec.get("effective_price", 0.0)) <= 0.0:
                 continue
-            if is_disqualified_commodity_candidate(rec, head_term, head_variants, keyword):
+            if is_disqualified_commodity_candidate(
+                rec,
+                head_term,
+                head_variants,
+                keyword,
+                excluded_brands=exclude_brands,
+                excluded_terms=excluded_terms,
+                required_subtypes=required_subtypes,
+            ):
                 continue
             final_products.append(
                 {
@@ -1116,6 +1356,14 @@ class ProductRetriever:
             applied["brand"] = brand
         if exclude_brands:
             applied["exclude_brands"] = exclude_brands
+        if excluded_brands:
+            applied["excluded_brands"] = excluded_brands
+        if excluded_categories:
+            applied["excluded_categories"] = excluded_categories
+        if excluded_terms:
+            applied["excluded_terms"] = excluded_terms
+        if required_subtypes:
+            applied["required_subtypes"] = required_subtypes
         if category:
             applied["category"] = category
         if max_price is not None:
