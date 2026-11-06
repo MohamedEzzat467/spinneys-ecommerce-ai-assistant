@@ -154,6 +154,253 @@ ANCHOR_NOUNS = (
     "butter", "honey", "flour", "eggs", "chicken", "meat"
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Commodity Taxonomy & Prepositional Disqualification
+# ─────────────────────────────────────────────────────────────────────────────
+
+COMMODITY_PRIMARY_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "زيت": ("grocery", "cooking oil & ghee", "oil", "marina offers", "spinneys products", "suhoor ramadan", "top selling products", "online deals"),
+    "زيوت": ("grocery", "cooking oil & ghee", "oil", "marina offers", "spinneys products", "suhoor ramadan", "top selling products", "online deals"),
+    "حليب": ("cheese, dairy & eggs", "milk", "full cream milk", "speciality milk", "dairy", "beverages", "grocery", "top selling products", "suhoor ramadan", "online deals"),
+    "لبن": ("cheese, dairy & eggs", "milk", "full cream milk", "speciality milk", "dairy", "beverages", "grocery", "top selling products", "suhoor ramadan", "online deals"),
+    "شاي": ("beverages", "grocery", "tea", "hot beverages", "top selling products", "suhoor ramadan", "online deals"),
+    "شاى": ("beverages", "grocery", "tea", "hot beverages", "top selling products", "suhoor ramadan", "online deals"),
+    "شوكولاتة": ("sweets & snacks", "chocolate", "confectionery", "grocery", "top selling products", "online deals"),
+    "شيكولاتة": ("sweets & snacks", "chocolate", "confectionery", "grocery", "top selling products", "online deals"),
+    "فراولة": ("fresh fruits & vegetables", "produce", "frozen food", "grocery"),
+}
+
+COMMODITY_FORBIDDEN_CATEGORIES: dict[str, set[str]] = {
+    "زيت": {
+        "beauty & personal care", "hair care", "face & body skincare", "baby care",
+        "electronics", "households", "cleaning products", "fashion & textiles",
+        "sweets & snacks", "biscuits", "seafood & fish", "canned food",
+    },
+    "زيوت": {
+        "beauty & personal care", "hair care", "face & body skincare", "baby care",
+        "electronics", "households", "cleaning products", "fashion & textiles",
+        "sweets & snacks", "biscuits", "seafood & fish", "canned food",
+    },
+    "حليب": {
+        "sweets & snacks", "biscuits", "chocolate", "confectionery",
+        "beauty & personal care", "hair care", "face & body skincare",
+        "households", "baby care", "cleaning products",
+    },
+    "لبن": {
+        "sweets & snacks", "biscuits", "chocolate", "confectionery",
+        "beauty & personal care", "hair care", "face & body skincare",
+        "households", "baby care", "cleaning products",
+    },
+    "شاي": {
+        "beauty & personal care", "hair care", "face & body skincare",
+        "households", "cleaning products", "fashion & textiles",
+        "sweets & snacks", "biscuits",
+    },
+    "شاى": {
+        "beauty & personal care", "hair care", "face & body skincare",
+        "households", "cleaning products", "fashion & textiles",
+        "sweets & snacks", "biscuits",
+    },
+    "شوكولاتة": {
+        "cheese, dairy & eggs", "milk", "full cream milk", "dairy",
+        "beauty & personal care", "households",
+    },
+    "شيكولاتة": {
+        "cheese, dairy & eggs", "milk", "full cream milk", "dairy",
+        "beauty & personal care", "households",
+    },
+    "فراولة": {
+        "cheese, dairy & eggs", "milk", "dairy",
+        "beauty & personal care", "households", "sweets & snacks",
+    },
+}
+
+COMMODITY_FORBIDDEN_HEAD_NOUNS: dict[str, set[str]] = {
+    "زيت": {
+        "ماكريل", "تونة", "تونه", "سردين", "رنجة", "رنجه", "فسيخ", "بطارخ", "فول",
+        "شامبو", "بلسم", "كريم", "لوشن", "سيروم", "غسول", "صابون", "شاور",
+        "جل", "مقرمشات", "شيبس", "بسكويت", "معجون", "بيك رولز", "بريك", "فن داي",
+        "دومتي سندوتش", "سندوتش", "جبنة بيضاء زيتون", "mackerel", "tuna", "sardine",
+    },
+    "زيوت": {
+        "ماكريل", "تونة", "تونه", "سردين", "رنجة", "رنجه", "فسيخ", "بطارخ", "فول",
+        "شامبو", "بلسم", "كريم", "لوشن", "سيروم", "غسول", "صابون", "شاور",
+        "جل", "مقرمشات", "شيبس", "بسكويت", "معجون", "بيك رولز", "بريك", "فن داي",
+        "دومتي سندوتش", "سندوتش", "mackerel", "tuna", "sardine",
+    },
+    "حليب": {
+        "شوكولاتة", "شيكولاتة", "شيكولاته", "بسكويت", "بسكوت", "كيك", "ويفر",
+        "سمن", "سمنة", "شامبو", "شاور", "جل", "لوشن", "كريم", "صابون", "معجون",
+        "شوكولاته", "chocolate", "biscuit", "cake", "ghee", "wafer",
+    },
+    "لبن": {
+        "شوكولاتة", "شيكولاتة", "شيكولاته", "بسكويت", "بسكوت", "كيك", "ويفر",
+        "سمن", "سمنة", "شامبو", "شاور", "جل", "لوشن", "كريم", "صابون", "معجون",
+        "شوكولاته", "chocolate", "biscuit", "cake", "ghee", "wafer",
+    },
+    "شاي": {
+        "غسول", "ماسك", "قناع", "لصاقات", "كريم", "سيروم", "شامبو", "لبان", "علكة",
+        "فوط", "مناديل", "مصفاة", "كوب", "مج", "wash", "mask", "patches", "cream", "gum",
+    },
+    "شاى": {
+        "غسول", "ماسك", "قناع", "لصاقات", "كريم", "سيروم", "شامبو", "لبان", "علكة",
+        "فوط", "مناديل", "مصفاة", "كوب", "مج", "wash", "mask", "patches", "cream", "gum",
+    },
+    "شوكولاتة": {
+        "حليب", "لبن", "زبادي", "كيك", "بسكويت", "كورن فليكس", "ايس كوفي", "شامبو",
+    },
+    "شيكولاتة": {
+        "حليب", "لبن", "زبادي", "كيك", "بسكويت", "كورن فليكس", "ايس كوفي", "شامبو",
+    },
+    "فراولة": {
+        "زبادي", "لبن", "حليب", "عصير", "مشروب", "شوكولاتة", "بسكويت", "ويفر", "جيلي", "ايس كريم",
+    },
+}
+
+
+def _get_stem_variants(w: str) -> set[str]:
+    res = {w}
+    if w.startswith("بال") and len(w) > 4:
+        res.add(w[3:])
+    elif w.startswith("ال") and len(w) > 3:
+        res.add(w[2:])
+    elif w.startswith("لل") and len(w) > 3:
+        res.add(w[2:])
+    elif w.startswith("ب") and len(w) > 2:
+        res.add(w[1:])
+    return res
+
+
+def is_prepositional_modifier_only(name_ar: str, name_en: str, head_term: Optional[str]) -> bool:
+    """
+    Determines if the head_term appears ONLY in prepositional, preservative, or flavoring contexts
+    (e.g., 'ماكريل في زيت', 'بسكويت بالحليب', 'كيك بالشوكولاتة', 'غسول بالشاي') without a standalone
+    occurrence as the primary noun.
+    """
+    if not head_term:
+        return False
+    norm_ht = normalize_text(head_term).strip().lower()
+    ht_clean = norm_ht[2:] if norm_ht.startswith("ال") and len(norm_ht) > 3 else norm_ht
+
+    targets = {ht_clean, norm_ht}
+    if ht_clean in ("حليب", "لبن"):
+        targets |= {"حليب", "لبن", "الحليب", "اللبن", "milk"}
+    elif ht_clean in ("زيت", "زيوت"):
+        targets |= {"زيت", "الزيت", "زيوت", "الزيوت", "oil", "oils"}
+    elif ht_clean in ("شاي", "شاى"):
+        targets |= {"شاي", "شاى", "الشاي", "الشاى", "tea"}
+    elif ht_clean in ("شوكولاتة", "شيكولاتة", "شيكولاته", "شوكولاته"):
+        targets |= {"شوكولاتة", "شيكولاتة", "شيكولاته", "شوكولاته", "chocolate"}
+    elif ht_clean in ("فراولة", "فراوله"):
+        targets |= {"فراولة", "فراوله", "strawberry"}
+
+    text_ar = normalize_text(name_ar or "").lower()
+    text_en = str(name_en or "").lower()
+    combined_raw = f"{text_ar} {text_en}"
+
+    def has_target_occurrence(txt: str) -> bool:
+        words = re.findall(r"\b[a-zA-Z0-9_\u0600-\u06FF]+\b", txt)
+        for w in words:
+            stems = _get_stem_variants(w)
+            for s in stems:
+                s_norm = normalize_text(s)
+                s_clean = s_norm[2:] if s_norm.startswith("ال") and len(s_norm) > 3 else s_norm
+                if s in targets or s_norm in targets or s_clean in targets:
+                    return True
+        return False
+
+    if not has_target_occurrence(combined_raw):
+        return False
+
+    masked = combined_raw
+    # 1. Arabic detached preposition phrases
+    prep_ar_detached = r"\b(?:في|فى|مع|من|بطعم|بنكهة|برائحة|بخلاصة|بمذاق|خالي\s+من|خالٍ\s+من|خالية\s+من|بدون|من\s+غير)\s+(?:ال)?(?:[^\s]+\s+){0,6}"
+    for t in targets:
+        esc_t = re.escape(t)
+        masked = re.sub(prep_ar_detached + r"(?:ال)?" + esc_t + r"\b", " ", masked)
+
+    # 2. Arabic attached prepositions: بال, ب, لل
+    for t in targets:
+        esc_t = re.escape(t)
+        masked = re.sub(r"\b(?:بال|ب|لل)" + esc_t + r"\b", " ", masked)
+
+    # 3. English preposition phrases
+    prep_en = r"\b(?:in|with|flavored\s+with|flavoured\s+with|flavor\s+of|flavour\s+of|taste\s+of|scented\s+with|extract\s+of|free\s+of|free\s+from)\s+(?:the\s+)?(?:[a-z0-9]+\s+){0,6}"
+    for t in targets:
+        esc_t = re.escape(t)
+        masked = re.sub(prep_en + esc_t + r"\b", " ", masked)
+
+    # 4. Commodity composite modifiers
+    if ht_clean in ("حليب", "لبن"):
+        masked = re.sub(r"\b(?:شوكولاتة|شيكولاتة|شيكولاته|بسكويت|بسكوت|كيك|ويفر|سمن|سمنة)\s+(?:ديري\s+)?(?:ال)?(?:حليب|لبن)\b", " ", masked)
+        masked = re.sub(r"\b(?:milk\s+(?:chocolate|biscuit|cake|candy|bar)|dairy\s+milk)\b", " ", masked)
+    elif ht_clean in ("زيت", "زيوت"):
+        masked = re.sub(r"\b(?:ماكريل|تونة|تونه|سردين|رنجة|رنجه|فسيخ|بطارخ)\s+(?:[^\s]+\s+){0,3}(?:في|فى|ب|بال)?\s*(?:ال)?زيت\b", " ", masked)
+        masked = re.sub(r"\b(?:tuna|mackerel|sardine|herring)\s+(?:[a-z0-9]+\s+){0,4}oil\b", " ", masked)
+    elif ht_clean in ("شوكولاتة", "شيكولاتة", "شيكولاته"):
+        masked = re.sub(r"\b(?:كيك|بسكويت|بسكوت|ويفر|ايس\s+كريم|آيس\s+كريم|حليب|لبن|زبادي)\s+(?:[^\s]+\s+){0,3}(?:ال)?(?:شوكولاتة|شيكولاتة|شيكولاته)\b", " ", masked)
+
+    words_remaining = re.findall(r"\b[a-zA-Z0-9_\u0600-\u06FF]+\b", masked)
+    still_has_primary = False
+    for w in words_remaining:
+        w_norm = normalize_text(w)
+        w_clean = w_norm[2:] if w_norm.startswith("ال") and len(w_norm) > 3 else w_norm
+        if w in targets or w_norm in targets or w_clean in targets:
+            still_has_primary = True
+            break
+
+    return not still_has_primary
+
+
+def is_disqualified_commodity_candidate(
+    rec: Optional[dict[str, Any]],
+    head_term: Optional[str],
+    head_variants: set[str],
+    explicit_keyword: Optional[str] = None,
+) -> bool:
+    """
+    Checks if a candidate is disqualified based on:
+      1. Conflicting category taxonomy (e.g. seafood or cosmetics for cooking oil).
+      2. Conflicting head noun (e.g. 'ماكريل', 'تونة' for 'زيت'; 'شوكولاتة' for 'حليب').
+      3. Prepositional modifier only (e.g. 'في زيت', 'بالحليب').
+    """
+    if not rec or not head_term:
+        return False
+    norm_ht = normalize_text(head_term).strip().lower()
+    ht_clean = norm_ht[2:] if norm_ht.startswith("ال") and len(norm_ht) > 3 else norm_ht
+
+    # If the user explicitly searched for the composite term, do not disqualify
+    if explicit_keyword:
+        norm_kw = normalize_text(explicit_keyword).lower()
+        if ht_clean in ("زيت", "زيوت") and any(k in norm_kw for k in ("ماكريل", "تونة", "تونه", "سردين", "شعر")):
+            return False
+        if ht_clean in ("حليب", "لبن") and any(k in norm_kw for k in ("شوكولاتة", "شيكولاتة", "بسكويت", "كيك", "سمن")):
+            return False
+
+    # 1. Category taxonomy alignment check
+    cat_lower = str(rec.get("category", "")).strip().lower()
+    forb_cats = COMMODITY_FORBIDDEN_CATEGORIES.get(ht_clean) or COMMODITY_FORBIDDEN_CATEGORIES.get(norm_ht)
+    if forb_cats and cat_lower in forb_cats:
+        return True
+
+    # 2. Conflicting primary head noun check
+    forb_heads = COMMODITY_FORBIDDEN_HEAD_NOUNS.get(ht_clean) or COMMODITY_FORBIDDEN_HEAD_NOUNS.get(norm_ht)
+    if forb_heads:
+        p_nar = normalize_text(str(rec.get("name_ar", "")))
+        p_nen = str(rec.get("name_en", "")).lower()
+        title_words = re.findall(r"\b[a-zA-Z0-9_\u0600-\u06FF]+\b", f"{p_nar} {p_nen}")
+        for w in title_words:
+            w_norm = normalize_text(w)
+            w_clean = w_norm[2:] if w_norm.startswith("ال") and len(w_norm) > 3 else w_norm
+            if w in forb_heads or w_norm in forb_heads or w_clean in forb_heads:
+                return True
+
+    # 3. Prepositional modifier only check
+    if is_prepositional_modifier_only(rec.get("name_ar", ""), rec.get("name_en", ""), head_term):
+        return True
+
+    return False
+
 
 class ProductRetriever:
     """
@@ -586,6 +833,14 @@ class ProductRetriever:
         if (is_food_target or is_dairy_query or is_nutrition_query or (is_foul_query and not is_explicit_peanut and not is_explicit_soy) or (is_oil_query and not is_explicit_cosmetic_oil)) and not is_explicit_household:
             mask &= (~df["_category_lower"].isin(NON_FOOD_CATEGORIES))
 
+        # Enforce Category Taxonomy Alignment for tracked commodities
+        if head_term:
+            norm_ht = normalize_text(head_term).strip().lower()
+            ht_clean = norm_ht[2:] if norm_ht.startswith("ال") and len(norm_ht) > 3 else norm_ht
+            forb_cats = COMMODITY_FORBIDDEN_CATEGORIES.get(ht_clean) or COMMODITY_FORBIDDEN_CATEGORIES.get(norm_ht)
+            if forb_cats:
+                mask &= (~df["_category_lower"].isin(forb_cats))
+
         if (head_term == "زيت" or is_oil_query) and not is_explicit_cosmetic_oil:
             cosmetic_pat = r"شعر|بشرة|مساج|حمام زيت|كوبرا|تدليك|لحية|سيروم|hair|body|skin|massage|cosmetic|serum|بديل الزيت"
             mask &= (~df["name_ar"].str.contains(cosmetic_pat, case=False, na=False))
@@ -618,24 +873,27 @@ class ProductRetriever:
                 return True
             nar = normalize_text(str(p_rec.get("name_ar", "")))
             nen = str(p_rec.get("name_en", "")).lower()
-            tokens = set(nar.split()) | set(nen.split())
-            tokens_al = {w[2:] if w.startswith("ال") and len(w) > 3 else w for w in tokens}
-            all_toks = tokens | tokens_al
-            if bool(all_toks & head_variants):
-                return True
-            for v in head_variants:
-                if len(v) >= 3 and (v in nar or v in nen):
+            title_words = re.findall(r"\b[a-zA-Z0-9_\u0600-\u06FF]+\b", f"{nar} {nen}")
+            for w in title_words:
+                w_norm = normalize_text(w)
+                w_clean = w_norm[2:] if w_norm.startswith("ال") and len(w_norm) > 3 else w_norm
+                if w in head_variants or w_norm in head_variants or w_clean in head_variants:
                     return True
-            cat_tokens = set(normalize_text(str(p_rec.get("category", ""))).split())
-            if bool(cat_tokens & head_variants):
-                return True
+            cat_words = re.findall(r"\b[a-zA-Z0-9_\u0600-\u06FF]+\b", normalize_text(str(p_rec.get("category", ""))))
+            for w in cat_words:
+                w_norm = normalize_text(w)
+                w_clean = w_norm[2:] if w_norm.startswith("ال") and len(w_norm) > 3 else w_norm
+                if w in head_variants or w_norm in head_variants or w_clean in head_variants:
+                    return True
             return False
 
         def _calc_item_bonus(p_rec: Optional[dict[str, Any]], p_name: str, p_cat: str) -> float:
             extra = 0.0
 
-            # 1. Mandatory Head-Term Filter
+            # 1. Mandatory Head-Term Filter & Disqualification Check
             if head_variants and not _has_head_term_match(p_rec):
+                return -1000.0
+            if is_disqualified_commodity_candidate(p_rec, head_term, head_variants, keyword):
                 return -1000.0
 
             # 2. Qualifiers match boosting (+30.0 for matching qualifier token)
@@ -645,8 +903,14 @@ class ProductRetriever:
                     if q_norm and len(q_norm) >= 2 and q_norm in p_name:
                         extra += 30.0
 
-            # 3. Target Department Boosting (+20.0)
-            if target_category and target_category.strip().lower() in p_cat:
+            # 3. Target Department / Commodity Alignment Boosting (+25.0)
+            if head_term:
+                norm_ht = normalize_text(head_term).strip().lower()
+                ht_clean = norm_ht[2:] if norm_ht.startswith("ال") and len(norm_ht) > 3 else norm_ht
+                pri_cats = COMMODITY_PRIMARY_CATEGORIES.get(ht_clean) or COMMODITY_PRIMARY_CATEGORIES.get(norm_ht)
+                if pri_cats and any(c in p_cat for c in pri_cats):
+                    extra += 25.0
+            elif target_category and target_category.strip().lower() in p_cat:
                 extra += 20.0
 
             # 4. Cooking Oil Category Boosting & Cosmetic Demotion
@@ -709,10 +973,15 @@ class ProductRetriever:
                             continue
                         if head_variants and not _has_head_term_match(p_rec):
                             continue
+                        if is_disqualified_commodity_candidate(p_rec, head_term, head_variants, keyword):
+                            continue
                         avail = p_rec["availability"]
                         p_name = normalize_text(str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower()
                         p_cat = str(p_rec.get("category", "")).lower()
-                        final_score = score + (0.5 if avail else 0.0) + _calc_item_bonus(p_rec, p_name, p_cat)
+                        bonus = _calc_item_bonus(p_rec, p_name, p_cat)
+                        if bonus < -500.0:
+                            continue
+                        final_score = score + (0.5 if avail else 0.0) + bonus
                         scored_candidates.append((pid, final_score))
                     scored_candidates.sort(key=lambda x: x[1], reverse=True)
                     ranked_product_ids = [pid for pid, _ in scored_candidates]
@@ -731,10 +1000,15 @@ class ProductRetriever:
                             continue
                         if head_variants and not _has_head_term_match(p_rec):
                             continue
+                        if is_disqualified_commodity_candidate(p_rec, head_term, head_variants, keyword):
+                            continue
                         avail = p_rec["availability"]
                         p_name = normalize_text(str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower()
                         p_cat = str(p_rec.get("category", "")).lower()
-                        final_score = score + (0.01 if avail else 0.0) + _calc_item_bonus(p_rec, p_name, p_cat)
+                        bonus = _calc_item_bonus(p_rec, p_name, p_cat)
+                        if bonus < -500.0:
+                            continue
+                        final_score = score + (0.01 if avail else 0.0) + bonus
                         scored_candidates.append((pid, final_score))
                     scored_candidates.sort(key=lambda x: x[1], reverse=True)
                     ranked_product_ids = [pid for pid, _ in scored_candidates]
@@ -753,11 +1027,15 @@ class ProductRetriever:
                             continue
                         if head_variants and not _has_head_term_match(p_rec):
                             continue
+                        if is_disqualified_commodity_candidate(p_rec, head_term, head_variants, keyword):
+                            continue
                         avail = p_rec["availability"]
                         p_name = normalize_text(str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower()
                         p_cat = str(p_rec.get("category", "")).lower()
-                        bonus = 2.0 if avail else 0.0
-                        final_score = score + bonus + _calc_item_bonus(p_rec, p_name, p_cat)
+                        bonus = _calc_item_bonus(p_rec, p_name, p_cat)
+                        if bonus < -500.0:
+                            continue
+                        final_score = score + (2.0 if avail else 0.0) + bonus
                         scored_candidates.append((pid, final_score))
 
                     scored_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -769,6 +1047,7 @@ class ProductRetriever:
                 valid_cand_pids = [
                     pid for pid in candidate_df["product_id"].to_list()
                     if _has_head_term_match(self.products_by_id.get(pid))
+                    and not is_disqualified_commodity_candidate(self.products_by_id.get(pid), head_term, head_variants, keyword)
                 ]
                 candidate_df = candidate_df[candidate_df["product_id"].isin(valid_cand_pids)]
             # Sort candidate_df
@@ -792,7 +1071,11 @@ class ProductRetriever:
         else:
             # If explicit sort order requested, re-sort the matched items by price
             if sort_order in ("price_asc", "price_desc"):
-                matched_subset = candidate_df[candidate_df["product_id"].isin(ranked_product_ids)]
+                valid_pids = [
+                    pid for pid in ranked_product_ids
+                    if not is_disqualified_commodity_candidate(self.products_by_id.get(pid), head_term, head_variants, keyword)
+                ]
+                matched_subset = candidate_df[candidate_df["product_id"].isin(valid_pids)]
                 is_asc = (sort_order == "price_asc")
                 sorted_cands = matched_subset.sort_values(
                     by=["availability", "effective_price"],
@@ -801,24 +1084,29 @@ class ProductRetriever:
                 ranked_product_ids = sorted_cands["product_id"].to_list()
 
         # Step 4: Format Product Results
-        selected_ids = ranked_product_ids[:limit]
+        selected_ids = ranked_product_ids[:limit * 2]
         final_products = []
         for pid in selected_ids:
             rec = self.products_by_id.get(pid)
-            if rec and float(rec.get("effective_price", 0.0)) > 0.0:
-                final_products.append(
-                    {
-                        "product_id": int(rec["product_id"]),
-                        "name_ar": str(rec["name_ar"]),
-                        "name_en": str(rec["name_en"]),
-                        "brand": str(rec["brand"]),
-                        "price": float(rec["effective_price"]),
-                        "regular_price": float(rec["default_price"]),
-                        "has_discount": bool(rec["has_discount"]),
-                        "availability": bool(rec["availability"]),
-                        "image_url": str(rec["image_url"]),
-                    }
-                )
+            if not rec or float(rec.get("effective_price", 0.0)) <= 0.0:
+                continue
+            if is_disqualified_commodity_candidate(rec, head_term, head_variants, keyword):
+                continue
+            final_products.append(
+                {
+                    "product_id": int(rec["product_id"]),
+                    "name_ar": str(rec["name_ar"]),
+                    "name_en": str(rec["name_en"]),
+                    "brand": str(rec["brand"]),
+                    "price": float(rec["effective_price"]),
+                    "regular_price": float(rec["default_price"]),
+                    "has_discount": bool(rec["has_discount"]),
+                    "availability": bool(rec["availability"]),
+                    "image_url": str(rec["image_url"]),
+                }
+            )
+            if len(final_products) >= limit:
+                break
 
         exec_time = (time.perf_counter() - t0) * 1000
 

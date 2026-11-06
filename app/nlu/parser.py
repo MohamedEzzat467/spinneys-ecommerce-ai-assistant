@@ -366,10 +366,16 @@ def extract_head_term_and_qualifiers(clean_query: Optional[str]) -> tuple[Option
     if not words:
         return None, [], None
 
-    # Check if any token matches a known head noun
+    # Check if any token matches a known head noun (skipping prepositional modifiers)
     head_idx = -1
     for idx, w in enumerate(words):
         w_norm = normalize_text(w)
+        # Skip token if preceded by an ingredient/modifier preposition
+        if idx > 0 and words[idx - 1] in ("في", "فى", "مع", "من", "بطعم", "بنكهة", "برائحة", "بخلاصة", "بمذاق", "in", "with"):
+            continue
+        # Skip token if it carries an attached preposition like بالـ or للـ or بـ
+        if w_norm.startswith("بال") or w_norm.startswith("لل") or (w_norm.startswith("ب") and len(w_norm) > 3 and w_norm[1:] in KNOWN_HEAD_NOUNS):
+            continue
         w_clean = w_norm[2:] if w_norm.startswith("ال") and len(w_norm) > 3 else w_norm
         if w_clean in KNOWN_HEAD_NOUNS or w_norm in KNOWN_HEAD_NOUNS:
             head_idx = idx
