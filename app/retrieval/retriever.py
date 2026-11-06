@@ -39,7 +39,13 @@ from app.core.normalizer import (
     normalize_brand,
     normalize_text,
 )
-from app.nlu.parser import parse_query as nlu_parse_query, sanitize_query
+from app.nlu.parser import (
+    extract_head_term_and_qualifiers,
+    get_head_term_variants,
+    parse_query as nlu_parse_query,
+    sanitize_query,
+    strip_brand_from_query,
+)
 from app.retrieval.hybrid_search import HybridSearchEngine
 from app.retrieval.recipe_engine import RecipeEngine
 
@@ -128,6 +134,24 @@ PROCESSED_CHEESE_STEMS = (
     "مطبوخ", "مطبوخة", "كريمي", "سبريد", "مثلثات", "مربعات", "شيدر سبريد",
     "جبن خضار", "جبنة خضار", "spread", "creamy", "cream cheese", "processed",
     "triangles", "portions"
+)
+
+COOKING_OIL_STEMS = (
+    "عباد", "ذرة", "ذره", "خليط", "طعام", "قلي", "طبخ", "زيتون", "صويا", "نباتي", "كانولا",
+    "sunflower", "corn", "olive", "cooking", "frying", "vegetable", "canola"
+)
+
+COSMETIC_OIL_STEMS = (
+    "شعر", "بشرة", "مساج", "حمام زيت", "كوبرا", "تدليك", "لحية", "سيروم",
+    "hair", "body", "skin", "massage", "cosmetic", "serum", "بديل الزيت"
+)
+
+ANCHOR_NOUNS = (
+    "زيت", "حليب", "لبن", "جبن", "جبنة", "فول", "شاي", "سكر", "ارز", "أرز",
+    "مكرونة", "تونة", "صلصة", "دجاج", "لحم", "بيض", "عسل", "زبدة", "دقيق",
+    "شوفان", "قهوة", "نسكافيه", "خل", "صابون", "مسحوق", "مناديل",
+    "oil", "milk", "cheese", "tea", "rice", "pasta", "sugar", "tuna", "coffee",
+    "butter", "honey", "flour", "eggs", "chicken", "meat"
 )
 
 
@@ -319,9 +343,12 @@ class ProductRetriever:
         self,
         query: str,
         limit: int = 10,
-        mode: str = "auto",  # "auto", "rules", "hybrid", "bm25"
+        mode: str = "auto",  # "auto", "rules", "hybrid", "bm25", "vector"
         filter_overrides: Optional[dict[str, Any]] = None,
         is_internal: bool = False,
+        head_term: Optional[str] = None,
+        qualifiers: Optional[list[str]] = None,
+        target_category: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Main retrieval method:
@@ -380,6 +407,9 @@ class ProductRetriever:
                 "brand": nlu.brand,
                 "exclude_brands": [],
                 "category": nlu.category,
+                "target_category": nlu.target_category,
+                "head_term": nlu.head_term,
+                "qualifiers": nlu.qualifiers,
                 "min_price": nlu.price_min,
                 "max_price": nlu.price_max,
                 "in_stock": nlu.in_stock,
@@ -390,6 +420,9 @@ class ProductRetriever:
         if filter_overrides:
             filters.update(filter_overrides)
 
+        head_term = head_term or filters.get("head_term")
+        qualifiers = qualifiers if qualifiers is not None else filters.get("qualifiers", [])
+        target_category = target_category or filters.get("target_category") or filters.get("category")
         brand = filters.get("brand")
         exclude_brands = filters.get("exclude_brands", [])
         category = filters.get("category")
@@ -400,6 +433,15 @@ class ProductRetriever:
         keyword = filters.get("query") or query
         if keyword:
             keyword = sanitize_query(keyword)
+
+        # Infer head_term and qualifiers universally if not yet set
+        if not head_term and keyword:
+            inferred_head, inferred_quals, inferred_cat = extract_head_term_and_qualifiers(keyword)
+            head_term = inferred_head
+            if not qualifiers:
+                qualifiers = inferred_quals
+            if not target_category:
+                target_category = inferred_cat
 
         # Step 2: In-Memory Fast Filtering (Vectorized Numpy / Pandas)
         df = self.df_meta
@@ -415,10 +457,22 @@ class ProductRetriever:
         # Start with all rows True
         mask = np.ones(len(df), dtype=bool)
 
-        # 1. Brand filter
+        # 1. Brand filter (Bilingual canonical + raw mapping)
         if brand:
-            b_norm = brand.strip().lower()
-            mask &= (df["_brand_lower"] == b_norm)
+            canon_b = normalize_brand(brand).strip().lower()
+            raw_b = brand.strip().lower()
+            valid_brands = {canon_b, raw_b}
+            for alias, canon in BRAND_NORMALIZATION.items():
+                if canon.strip().lower() == canon_b:
+                    valid_brands.add(alias.strip().lower())
+                    valid_brands.add(normalize_text(alias).strip().lower())
+            mask &= (df["_brand_lower"].isin(valid_brands))
+
+            # Strip brand tokens from search keyword if present to avoid query collision
+            if keyword:
+                stripped_kw = strip_brand_from_query(keyword, brand)
+                if stripped_kw:
+                    keyword = stripped_kw
 
         # 2. Exclude brands
         if exclude_brands:
@@ -426,9 +480,10 @@ class ProductRetriever:
             if ex_set:
                 mask &= (~df["_brand_lower"].isin(ex_set))
 
-        # 3. Category filter (supports comma-separated multi-category like 'dairy,canned food,poultry,legumes')
-        if category:
-            cat_tokens = [c.strip().lower() for c in re.split(r"[,/|]", category) if c.strip()]
+        # 3. Category filter: only apply strict hard mask if explicitly requested in filter_overrides
+        explicit_cat = filter_overrides.get("category") if filter_overrides else None
+        if explicit_cat:
+            cat_tokens = [c.strip().lower() for c in re.split(r"[,/|]", explicit_cat) if c.strip()]
             if cat_tokens:
                 cat_mask = np.zeros(len(df), dtype=bool)
                 for cat_norm in cat_tokens:
@@ -437,8 +492,7 @@ class ProductRetriever:
                         | (df["_category_lower"].str.startswith(cat_norm))
                         | (df["_category_lower"].str.contains(cat_norm, regex=False, na=False))
                     )
-                # If category was broad nutritional target, also include 'grocery' (where tuna/foul/eggs live)
-                if any(k in category.lower() for k in ["legumes", "canned food", "poultry", "dairy"]):
+                if any(k in explicit_cat.lower() for k in ["legumes", "canned food", "poultry", "dairy"]):
                     cat_mask |= (df["_category_lower"] == "grocery")
                 mask &= cat_mask
 
@@ -491,9 +545,53 @@ class ProductRetriever:
             or (bool(keyword) and any(w in keyword.lower() for w in ("صويا", "soy", "soya")))
         )
 
+        is_oil_query = (
+            bool(re.search(r"\b(زيت|الزيت|oil|oils)\b", norm_q, re.IGNORECASE))
+            or (bool(keyword) and bool(re.search(r"\b(زيت|الزيت|oil|oils)\b", keyword, re.IGNORECASE)))
+        )
+        is_explicit_cosmetic_oil = (
+            any(w in norm_q.lower() for w in ("شعر", "بشرة", "مساج", "تدليك", "لحية", "سيروم", "حمام زيت", "hair", "skin", "body", "massage", "beard", "serum"))
+            or (bool(keyword) and any(w in keyword.lower() for w in ("شعر", "بشرة", "مساج", "تدليك", "لحية", "سيروم", "حمام زيت", "hair", "skin", "body", "massage", "beard", "serum")))
+        )
+
         is_nutrition_query = bool(filters.get("attribute_focus")) or any(w in norm_q.lower() for w in ["بروتين", "دايت", "سعرات", "طاقة", "دهون", "تونة", "دجاج", "بيض", "شوفان"])
-        if is_dairy_query or is_nutrition_query or (is_foul_query and not is_explicit_peanut and not is_explicit_soy):
+
+        # Check if query is for consumable/food vs household/personal care
+        is_food_head = False
+        is_explicit_household = False
+        if head_term:
+            norm_ht = normalize_text(head_term).strip().lower()
+            ht_clean = norm_ht[2:] if norm_ht.startswith("ال") and len(norm_ht) > 3 else norm_ht
+            food_heads = {
+                "زيت", "سمن", "سمنة", "سكر", "ملح", "دقيق", "طحين", "ارز", "أرز", "رز", "مكرونة", "مكرونه",
+                "شعرية", "صلصة", "خل", "توابل", "بهارات", "عسل", "مربى", "فول", "عدس", "حمص", "تونة", "تونه",
+                "شوفان", "حليب", "لبن", "جبن", "جبنة", "جبنه", "زبادي", "قشطة", "زبدة", "زبده", "بيض", "شاي", "شاى",
+                "قهوة", "قهوه", "نسكافيه", "عصير", "مشروب", "دجاج", "فراخ", "لحم", "لحمة", "لحمه", "سمك", "سجق", "برجر",
+                "بسكويت", "شوكولاتة", "شيبس", "سناك", "طعام"
+            }
+            household_heads = {
+                "مناديل", "منديل", "صابون", "صابونة", "مسحوق", "منظف", "كلور", "ديتول", "أكياس", "اكياس",
+                "أطباق", "اطباق", "علب", "علبة", "شامبو", "بلسم", "معجون", "فرشاة", "حفاضات", "بامبرز"
+            }
+            is_food_head = (ht_clean in food_heads) or (norm_ht in food_heads)
+            is_explicit_household = (ht_clean in household_heads) or (norm_ht in household_heads)
+
+        target_cat_lower = (target_category or "").strip().lower()
+        is_food_target = is_food_head or any(k in target_cat_lower for k in ("grocery", "dairy", "beverage", "meat", "bakery", "produce", "food"))
+
+        # Explicit household tokens in query
+        if any(w in norm_q.lower() for w in ("مناديل", "صابون", "مسحوق", "كلور", "شامبو", "علب", "اطباق", "أطباق")):
+            is_explicit_household = True
+
+        if (is_food_target or is_dairy_query or is_nutrition_query or (is_foul_query and not is_explicit_peanut and not is_explicit_soy) or (is_oil_query and not is_explicit_cosmetic_oil)) and not is_explicit_household:
             mask &= (~df["_category_lower"].isin(NON_FOOD_CATEGORIES))
+
+        if (head_term == "زيت" or is_oil_query) and not is_explicit_cosmetic_oil:
+            cosmetic_pat = r"شعر|بشرة|مساج|حمام زيت|كوبرا|تدليك|لحية|سيروم|hair|body|skin|massage|cosmetic|serum|بديل الزيت"
+            mask &= (~df["name_ar"].str.contains(cosmetic_pat, case=False, na=False))
+            mask &= (~df["name_en"].str.contains(cosmetic_pat, case=False, na=False))
+            fish_cheese_oil_pat = r"خالية من الزيت|خالي من الزيت|رنجه|سردين|تونة|بطارخ|فسيخ|فيليه فى الزيت"
+            mask &= (~df["name_ar"].str.contains(fish_cheese_oil_pat, regex=True, na=False))
 
         candidate_df = df[mask]
         total_matched = len(candidate_df)
@@ -513,9 +611,55 @@ class ProductRetriever:
         # Step 3: Candidate Ranking
         ranked_product_ids: list[int] = []
 
+        head_variants: set[str] = get_head_term_variants(head_term) if head_term else set()
+
+        def _has_head_term_match(p_rec: Optional[dict[str, Any]]) -> bool:
+            if not head_variants or not p_rec:
+                return True
+            nar = normalize_text(str(p_rec.get("name_ar", "")))
+            nen = str(p_rec.get("name_en", "")).lower()
+            tokens = set(nar.split()) | set(nen.split())
+            tokens_al = {w[2:] if w.startswith("ال") and len(w) > 3 else w for w in tokens}
+            all_toks = tokens | tokens_al
+            if bool(all_toks & head_variants):
+                return True
+            for v in head_variants:
+                if len(v) >= 3 and (v in nar or v in nen):
+                    return True
+            cat_tokens = set(normalize_text(str(p_rec.get("category", ""))).split())
+            if bool(cat_tokens & head_variants):
+                return True
+            return False
+
         def _calc_item_bonus(p_rec: Optional[dict[str, Any]], p_name: str, p_cat: str) -> float:
             extra = 0.0
-            if is_foul_query and not is_explicit_peanut and not is_explicit_soy:
+
+            # 1. Mandatory Head-Term Filter
+            if head_variants and not _has_head_term_match(p_rec):
+                return -1000.0
+
+            # 2. Qualifiers match boosting (+30.0 for matching qualifier token)
+            if qualifiers:
+                for q in qualifiers:
+                    q_norm = normalize_text(q).strip().lower()
+                    if q_norm and len(q_norm) >= 2 and q_norm in p_name:
+                        extra += 30.0
+
+            # 3. Target Department Boosting (+20.0)
+            if target_category and target_category.strip().lower() in p_cat:
+                extra += 20.0
+
+            # 4. Cooking Oil Category Boosting & Cosmetic Demotion
+            if (head_term == "زيت" or is_oil_query) and not is_explicit_cosmetic_oil:
+                if any(term in p_name for term in COSMETIC_OIL_STEMS):
+                    extra -= 50.0
+                elif any(stem in p_name for stem in COOKING_OIL_STEMS):
+                    extra += 30.0
+                if p_cat in ("oil", "grocery"):
+                    extra += 15.0
+
+            # 5. Foul Legume Handling
+            elif is_foul_query and not is_explicit_peanut and not is_explicit_soy:
                 p_nar = normalize_text(str(p_rec.get("name_ar", ""))) if p_rec else ""
                 p_nen = str(p_rec.get("name_en", "")).lower() if p_rec else ""
                 p_words_ar = set(p_nar.split())
@@ -561,9 +705,13 @@ class ProductRetriever:
                     scored_candidates = []
                     for pid, score in vector_results:
                         p_rec = self.products_by_id.get(pid)
-                        avail = p_rec["availability"] if p_rec else False
-                        p_name = (str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower() if p_rec else ""
-                        p_cat = str(p_rec.get("category", "")).lower() if p_rec else ""
+                        if not p_rec:
+                            continue
+                        if head_variants and not _has_head_term_match(p_rec):
+                            continue
+                        avail = p_rec["availability"]
+                        p_name = normalize_text(str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower()
+                        p_cat = str(p_rec.get("category", "")).lower()
                         final_score = score + (0.5 if avail else 0.0) + _calc_item_bonus(p_rec, p_name, p_cat)
                         scored_candidates.append((pid, final_score))
                     scored_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -579,9 +727,13 @@ class ProductRetriever:
                     scored_candidates = []
                     for pid, score in hybrid_results:
                         p_rec = self.products_by_id.get(pid)
-                        avail = p_rec["availability"] if p_rec else False
-                        p_name = (str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower() if p_rec else ""
-                        p_cat = str(p_rec.get("category", "")).lower() if p_rec else ""
+                        if not p_rec:
+                            continue
+                        if head_variants and not _has_head_term_match(p_rec):
+                            continue
+                        avail = p_rec["availability"]
+                        p_name = normalize_text(str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower()
+                        p_cat = str(p_rec.get("category", "")).lower()
                         final_score = score + (0.01 if avail else 0.0) + _calc_item_bonus(p_rec, p_name, p_cat)
                         scored_candidates.append((pid, final_score))
                     scored_candidates.sort(key=lambda x: x[1], reverse=True)
@@ -594,13 +746,16 @@ class ProductRetriever:
                     candidate_ids=candidate_ids,
                 )
                 if bm25_results:
-                    # Boost in-stock candidates and dairy relevance
                     scored_candidates = []
                     for pid, score in bm25_results:
                         p_rec = self.products_by_id.get(pid)
-                        avail = p_rec["availability"] if p_rec else False
-                        p_name = (str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower() if p_rec else ""
-                        p_cat = str(p_rec.get("category", "")).lower() if p_rec else ""
+                        if not p_rec:
+                            continue
+                        if head_variants and not _has_head_term_match(p_rec):
+                            continue
+                        avail = p_rec["availability"]
+                        p_name = normalize_text(str(p_rec.get("name_ar", "")) + " " + str(p_rec.get("name_en", ""))).lower()
+                        p_cat = str(p_rec.get("category", "")).lower()
                         bonus = 2.0 if avail else 0.0
                         final_score = score + bonus + _calc_item_bonus(p_rec, p_name, p_cat)
                         scored_candidates.append((pid, final_score))
@@ -610,6 +765,12 @@ class ProductRetriever:
 
         # If no keyword matches or pure filter query, rank from candidate_df
         if not ranked_product_ids:
+            if head_variants:
+                valid_cand_pids = [
+                    pid for pid in candidate_df["product_id"].to_list()
+                    if _has_head_term_match(self.products_by_id.get(pid))
+                ]
+                candidate_df = candidate_df[candidate_df["product_id"].isin(valid_cand_pids)]
             # Sort candidate_df
             if sort_order == "price_asc":
                 sorted_cands = candidate_df.sort_values(

@@ -90,6 +90,9 @@ class NLUResult(BaseModel):
     sort_by: Literal["price_asc", "price_desc", "relevance"] = "relevance"
     attribute_focus: Optional[str] = None
     category: Optional[str] = None
+    head_term: Optional[str] = None
+    qualifiers: list[str] = Field(default_factory=list)
+    target_category: Optional[str] = None
     price_max: Optional[float] = None
     price_min: Optional[float] = None
     is_followup: bool = False
@@ -153,11 +156,248 @@ class NLUResult(BaseModel):
         if str(self.intent) == "out-of-scope":
             self.intent = "out_of_scope"
 
+        # Sync category <-> target_category
+        if self.target_category and not self.category:
+            self.category = self.target_category
+        elif self.category and not self.target_category:
+            self.target_category = self.category
+
         return self
 
 
 # Backward-compatible alias
 ParseResult = NLUResult
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Universal Noun / Head-Entity Dictionaries & Extraction
+# ─────────────────────────────────────────────────────────────────────────────
+
+HEAD_TERM_SYNONYMS: dict[str, set[str]] = {
+    "زيت": {"زيت", "زيوت", "oil", "oils"},
+    "زيوت": {"زيت", "زيوت", "oil", "oils"},
+    "حليب": {"حليب", "لبن", "milk"},
+    "لبن": {"حليب", "لبن", "milk"},
+    "جبنة": {"جبنة", "جبن", "جبنه", "اجبان", "أجبان", "cheese"},
+    "جبن": {"جبنة", "جبن", "جبنه", "اجبان", "أجبان", "cheese"},
+    "جبنه": {"جبنة", "جبن", "جبنه", "اجبان", "أجبان", "cheese"},
+    "شاي": {"شاي", "شاى", "tea"},
+    "شاى": {"شاي", "شاى", "tea"},
+    "ارز": {"ارز", "أرز", "رز", "rice"},
+    "أرز": {"ارز", "أرز", "رز", "rice"},
+    "رز": {"ارز", "أرز", "رز", "rice"},
+    "مكرونة": {"مكرونة", "مكرونه", "معكرونة", "معكرونه", "pasta", "macaroni"},
+    "مكرونه": {"مكرونة", "مكرونه", "معكرونة", "معكرونه", "pasta", "macaroni"},
+    "تونة": {"تونة", "تونه", "tuna"},
+    "تونه": {"تونة", "تونه", "tuna"},
+    "سكر": {"سكر", "sugar"},
+    "ملح": {"ملح", "salt"},
+    "مناديل": {"مناديل", "منديل", "tissues", "napkins", "wipes"},
+    "منديل": {"مناديل", "منديل", "tissues", "napkins", "wipes"},
+    "فول": {"فول", "foul", "beans", "ful"},
+    "دجاج": {"دجاج", "فراخ", "دواجن", "chicken", "poultry"},
+    "فراخ": {"دجاج", "فراخ", "دواجن", "chicken", "poultry"},
+    "لحم": {"لحم", "لحمة", "لحمه", "لحوم", "meat", "beef"},
+    "لحمة": {"لحم", "لحمة", "لحمه", "لحوم", "meat", "beef"},
+    "لحمه": {"لحم", "لحمة", "لحمه", "لحوم", "meat", "beef"},
+    "بيض": {"بيض", "بيضه", "بيضة", "eggs", "egg"},
+    "عسل": {"عسل", "honey"},
+    "زبدة": {"زبدة", "زبده", "butter"},
+    "زبده": {"زبدة", "زبده", "butter"},
+    "دقيق": {"دقيق", "طحين", "flour"},
+    "طحين": {"دقيق", "طحين", "flour"},
+    "شوفان": {"شوفان", "oats", "oat"},
+    "قهوة": {"قهوة", "قهوه", "بن", "coffee"},
+    "صلصة": {"صلصة", "صلصه", "sauce", "paste"},
+    "خل": {"خل", "vinegar"},
+    "صابون": {"صابون", "صابونة", "صابونه", "soap"},
+    "مسحوق": {"مسحوق", "detergent", "powder"},
+}
+
+KNOWN_HEAD_NOUNS: set[str] = {
+    "زيت", "سمن", "سمنة", "زبدة", "زبده", "حليب", "لبن", "جبن", "جبنة", "جبنه", "زبادي", "قشطة",
+    "شاي", "شاى", "قهوة", "قهوه", "نسكافيه", "عصير", "مشروب", "مياه", "مية", "كولا", "سودا",
+    "ارز", "أرز", "رز", "مكرونة", "مكرونه", "شعرية", "عدس", "فول", "حمص", "فاصوليا", "لوبيا",
+    "سكر", "ملح", "دقيق", "طحين", "شوفان", "عسل", "مربى", "صلصة", "صلصه", "كاتشب", "مايونيز", "خل",
+    "توابل", "بهارات", "كمون", "فلفل", "كركم", "بابريكا", "قرفة", "كسبرة", "كزبرة",
+    "تونة", "تونه", "سمك", "سردين", "سلمون", "جمبري", "دجاج", "فراخ", "لحم", "لحمة", "لحمه", "كفتة", "برجر", "سجق", "بيض",
+    "بسكويت", "بسكوت", "شوكولاتة", "شيكولاتة", "شيبس", "شيبسي", "سناك", "كيك", "ويفر",
+    "مناديل", "منديل", "صابون", "صابونة", "صابونه", "شامبو", "بلسم", "شاور", "معجون", "فرشاة",
+    "مسحوق", "منظف", "كلور", "ديتول", "ملمع", "مطهر", "أكياس", "اكياس", "فويل", "أطباق", "اطباق", "علب", "علبة",
+    "حفاضات", "بامبرز"
+}
+
+CATEGORY_BY_HEAD_TERM: dict[str, str] = {
+    "زيت": "Grocery",
+    "سمن": "Grocery",
+    "سمنة": "Grocery",
+    "سكر": "Grocery",
+    "ملح": "Grocery",
+    "دقيق": "Grocery",
+    "طحين": "Grocery",
+    "ارز": "Grocery",
+    "أرز": "Grocery",
+    "رز": "Grocery",
+    "مكرونة": "Grocery",
+    "مكرونه": "Grocery",
+    "شعرية": "Grocery",
+    "صلصة": "Grocery",
+    "صلصه": "Grocery",
+    "خل": "Grocery",
+    "توابل": "Grocery",
+    "بهارات": "Grocery",
+    "عسل": "Grocery",
+    "مربى": "Grocery",
+    "فول": "Grocery",
+    "عدس": "Grocery",
+    "حمص": "Grocery",
+    "تونة": "Grocery",
+    "تونه": "Grocery",
+    "شوفان": "Grocery",
+    "حليب": "Dairy",
+    "لبن": "Dairy",
+    "جبن": "Dairy",
+    "جبنة": "Dairy",
+    "جبنه": "Dairy",
+    "زبادي": "Dairy",
+    "قشطة": "Dairy",
+    "زبدة": "Dairy",
+    "زبده": "Dairy",
+    "بيض": "Dairy",
+    "شاي": "Beverages",
+    "شاى": "Beverages",
+    "قهوة": "Beverages",
+    "قهوه": "Beverages",
+    "نسكافيه": "Beverages",
+    "عصير": "Beverages",
+    "مشروب": "Beverages",
+    "مياه": "Beverages",
+    "مية": "Beverages",
+    "كولا": "Beverages",
+    "دجاج": "Meat & Poultry",
+    "فراخ": "Meat & Poultry",
+    "لحم": "Meat & Poultry",
+    "لحمة": "Meat & Poultry",
+    "لحمه": "Meat & Poultry",
+    "سمك": "Meat & Poultry",
+    "جمبري": "Meat & Poultry",
+    "سجق": "Meat & Poultry",
+    "برجر": "Meat & Poultry",
+    "بسكويت": "Sweets & Snacks",
+    "بسكوت": "Sweets & Snacks",
+    "شوكولاتة": "Sweets & Snacks",
+    "شيكولاتة": "Sweets & Snacks",
+    "شيبس": "Sweets & Snacks",
+    "شيبسي": "Sweets & Snacks",
+    "كيك": "Sweets & Snacks",
+    "ويفر": "Sweets & Snacks",
+    "مناديل": "Households",
+    "منديل": "Households",
+    "صابون": "Households",
+    "صابونة": "Households",
+    "مسحوق": "Households",
+    "منظف": "Households",
+    "كلور": "Households",
+    "ديتول": "Households",
+    "أكياس": "Households",
+    "اكياس": "Households",
+    "أطباق": "Households",
+    "اطباق": "Households",
+    "علب": "Households",
+    "علبة": "Households",
+    "شامبو": "Beauty & Personal Care",
+    "بلسم": "Beauty & Personal Care",
+    "معجون": "Beauty & Personal Care",
+    "فرشاة": "Beauty & Personal Care",
+    "حفاضات": "Baby Care",
+    "بامبرز": "Baby Care",
+}
+
+
+def get_head_term_variants(head_term: Optional[str]) -> set[str]:
+    """
+    Returns exhaustive bilingual lemmas, synonyms, and Arabic morphological variants
+    for a given head term (e.g. 'حليب' -> {'حليب', 'لبن', 'الحليب', 'اللبن', 'milk'}).
+    """
+    if not head_term:
+        return set()
+
+    raw = head_term.strip().lower()
+    norm = normalize_text(raw).strip().lower()
+    variants = {raw, norm}
+
+    # Add/strip definite article 'ال'
+    for v in list(variants):
+        if v.startswith("ال") and len(v) > 3:
+            variants.add(v[2:])
+        elif not v.startswith("ال") and len(v) >= 2:
+            variants.add("ال" + v)
+
+    # Check synonyms map
+    for word in list(variants):
+        clean_w = word[2:] if word.startswith("ال") and len(word) > 3 else word
+        lookup_keys = [word, clean_w]
+        for lk in lookup_keys:
+            if lk in HEAD_TERM_SYNONYMS:
+                for syn in HEAD_TERM_SYNONYMS[lk]:
+                    syn_raw = syn.strip().lower()
+                    syn_norm = normalize_text(syn_raw).strip().lower()
+                    variants.add(syn_raw)
+                    variants.add(syn_norm)
+                    if syn_raw.startswith("ال") and len(syn_raw) > 3:
+                        variants.add(syn_raw[2:])
+                    elif not syn_raw.startswith("ال") and len(syn_raw) >= 2:
+                        variants.add("ال" + syn_raw)
+
+    return {v for v in variants if len(v) >= 2}
+
+
+def extract_head_term_and_qualifiers(clean_query: Optional[str]) -> tuple[Optional[str], list[str], Optional[str]]:
+    """
+    Universally extracts:
+      - head_term: Primary product noun
+      - qualifiers: List of attribute or secondary modifier tokens
+      - target_category: Inferred primary department
+    """
+    if not clean_query:
+        return None, [], None
+
+    words = clean_query.strip().split()
+    if not words:
+        return None, [], None
+
+    # Check if any token matches a known head noun
+    head_idx = -1
+    for idx, w in enumerate(words):
+        w_norm = normalize_text(w)
+        w_clean = w_norm[2:] if w_norm.startswith("ال") and len(w_norm) > 3 else w_norm
+        if w_clean in KNOWN_HEAD_NOUNS or w_norm in KNOWN_HEAD_NOUNS:
+            head_idx = idx
+            break
+
+    if head_idx != -1:
+        head_term = words[head_idx]
+        qualifiers = [w for i, w in enumerate(words) if i != head_idx]
+    else:
+        # Default Arabic construct: first noun is the head noun
+        head_term = words[0]
+        qualifiers = words[1:]
+
+    # Clean head_term (remove definite article if present for canonical form)
+    norm_head = normalize_text(head_term)
+    canon_head = norm_head[2:] if norm_head.startswith("ال") and len(norm_head) > 3 else norm_head
+
+    # Infer target category
+    target_cat = CATEGORY_BY_HEAD_TERM.get(canon_head) or CATEGORY_BY_HEAD_TERM.get(norm_head)
+    if not target_cat:
+        if canon_head in ("زيت", "سمن", "سكر", "شاي", "ارز", "مكرونة", "صلصة", "فول", "عدس", "دقيق", "تونة"):
+            target_cat = "Grocery"
+        elif canon_head in ("لبن", "حليب", "جبن", "جبنة", "زبادي"):
+            target_cat = "Dairy"
+        elif canon_head in ("مناديل", "صابون", "منظف"):
+            target_cat = "Households"
+
+    return canon_head, qualifiers, target_cat
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -410,23 +650,54 @@ def extract_limit(text: str) -> Optional[int]:
     return None
 
 
+def strip_brand_from_query(query: Optional[str], brand: Optional[str]) -> Optional[str]:
+    """
+    Strips brand name and all known bilingual aliases from query text,
+    ensuring pure entity retrieval without brand query collisions.
+    """
+    if not query or not brand:
+        return query
+
+    canonical_b = normalize_brand(brand)
+    aliases = {
+        brand.lower(),
+        canonical_b.lower(),
+        normalize_text(brand).lower(),
+        normalize_text(canonical_b).lower(),
+    }
+    for alias, canon in BRAND_NORMALIZATION.items():
+        if canon.lower() == canonical_b.lower():
+            aliases.add(alias.lower())
+            aliases.add(normalize_text(alias).lower())
+
+    cleaned = query
+    for alias in sorted(aliases, key=len, reverse=True):
+        if len(alias) >= 2:
+            cleaned = re.sub(r"\b" + re.escape(alias) + r"\b", " ", cleaned, flags=re.IGNORECASE)
+
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned if len(cleaned) >= 2 else None
+
+
 def sanitize_query(raw_text: str) -> str:
     """
     Sanitizes customer queries by stripping generic action verbs, request stems,
     qualifiers/superlatives (افضل, نوع), availability/stock words, price inquiry stems,
     sorting expressions (including conjugated colloquial forms), numbers/quantifiers,
-    meal/item request stems, and punctuation, preserving strictly the core product entity.
+    conversational fillers (قصدى, فين), meal/item request stems, and punctuation,
+    preserving strictly the core product entity.
     """
     text = raw_text.strip()
     # 1. Clean punctuation (Arabic question mark ؟, English ?, !, commas, etc.)
     text = re.sub(r"[?؟!\.,،;:~]+", " ", text)
     norm = normalize_text(text)
 
-    # 2. Generic action verbs and request stems
+    # 2. Generic action verbs, request stems, and conversational fillers
     request_stems_re = re.compile(
         r"\b(اقترح\w*|اقتراح\w*|ورشح\w*|رشح\w*|ترشح\w*|عايز\w*|عاوز\w*|عايزين|محتاج\w*|ممكن|"
         r"لو سمحت|من فضلك|وريني|هاتلي|هات|اعرضلي|قولي|ابحث عن|دورلي على|دورلي|"
-        r"suggest\w*|recommend\w*|show me|find me|i want|i need|give me|please)\b",
+        r"قصد(?:ي|ى)|يعني|بقولك|فين|عندكم|عندك|موجود|متاح|هو في|هو فيه|"
+        r"suggest\w*|recommend\w*|show me|find me|i want|i need|give me|please|where is|i mean|do you have)\b",
         re.IGNORECASE,
     )
     norm = request_stems_re.sub(" ", norm)
@@ -494,9 +765,19 @@ def sanitize_query(raw_text: str) -> str:
 
     norm = re.sub(r"\s+", " ", norm).strip()
 
-    # Normalize isolated definite article for key entities ("الجبن" -> "جبن")
-    if norm in ("الجبن", "الجبنة", "اللبن", "الحليب", "الشاي", "السكر", "الزيت", "الفول"):
-        norm = norm[2:]
+    # Normalize definite article Al- for key grocery nouns ("الزيت" -> "زيت", "الزيت طعام" -> "زيت طعام")
+    words = norm.split()
+    cleaned_words = []
+    for w in words:
+        if w.startswith("ال") and len(w) >= 4 and w in (
+            "الزيت", "الجبن", "الجبنة", "اللبن", "الحليب", "الشاي", "السكر", "الفول",
+            "الارز", "الأرز", "المكرونة", "الدجاج", "اللحم", "البيض", "العسل", "الزبدة",
+            "الدقيق", "الشوفان", "القهوة", "التونة", "الصلصة", "الخل"
+        ):
+            cleaned_words.append(w[2:])
+        else:
+            cleaned_words.append(w)
+    norm = " ".join(cleaned_words)
 
     return norm if len(norm) >= 2 else normalize_text(text).strip()
 
@@ -729,6 +1010,9 @@ AGENTIC_SYSTEM_PROMPT = (
     '  "action": "search" | "recipe" | "advisory_qa" | "count_inquiry" | "sort" | "out_of_scope",\n'
     '  "intent": "search" | "recipe" | "advisory" | "count_inquiry" | "sort" | "out_of_scope",\n'
     '  "clean_query": string | null,\n'
+    '  "head_term": string | null,\n'
+    '  "qualifiers": [string],\n'
+    '  "target_category": string | null,\n'
     '  "primary_ingredient": string | null,\n'
     '  "recipe_advice": string | null,\n'
     '  "conversational_reply": string | null,\n'
@@ -743,36 +1027,46 @@ AGENTIC_SYSTEM_PROMPT = (
     '  "is_count_query": boolean\n'
     "}\n\n"
     "Strict Decision Rules:\n"
+    "0. UNIVERSAL HEAD-ENTITY & QUALIFIER EXTRACTION (MANDATORY FOR SEARCH & RECIPES):\n"
+    "   - head_term: The primary single product noun (e.g., 'زيت' for 'زيت طعام', 'ملح' for 'ملح طعام', 'حليب' for 'حليب جهينة', 'شاي' for 'شاي أخضر', 'مناديل' for 'مناديل مائدة', 'جبنة' for 'جبنة بيضاء').\n"
+    "   - qualifiers: List of attributes or secondary modifier nouns (e.g., ['طعام'], ['أخضر'], ['بيضاء'], ['مائدة']).\n"
+    "   - target_category: Store department ('Grocery', 'Dairy', 'Beverages', 'Households', 'Beauty & Personal Care', 'Meat & Poultry', 'Sweets & Snacks').\n\n"
     "1. RECIPE & COOKING INQUIRIES (e.g. 'وصفه للحمه', 'مكونات بيتزا', 'عايز اطبخ ملوخية', 'طريقة عمل كباب حلة'):\n"
     "   - action: 'recipe'\n"
     "   - intent: 'recipe'\n"
     "   - recipe_advice: Briefly outline the core recipe, cooking steps, and essential ingredients in clear, appealing Arabic.\n"
     "   - primary_ingredient: Concrete grocery entity in store catalog to retrieve product cards (e.g. for 'وصفه للحمه' -> 'لحم', for 'مكونات بيتزا' -> 'دقيق' or 'جبنة موتزاريلا').\n"
     "   - clean_query: Same as primary_ingredient.\n"
+    "   - head_term: Primary ingredient noun.\n"
     "   - limit: 5.\n\n"
     "2. CONVERSATIONAL & NUTRITIONAL Q&A (e.g. 'ايهم اعلى بروتين؟', 'ايه الفرق بينهم؟', 'انهي ارخص؟', 'مين احسن؟'):\n"
     "   - When customer asks about previously displayed visible items (visible_products):\n"
     "   - action: 'advisory_qa'\n"
     "   - intent: 'advisory'\n"
     "   - clean_query: null\n"
+    "   - head_term: null\n"
     "   - conversational_reply: Write an intelligent, concise comparative answer in Arabic directly analyzing the visible items. Never invent non-existent products.\n\n"
     "3. CATALOG SEARCH & REFINEMENTS (e.g. 'افضل 5 انواع فول', 'لبن جهينة', 'جبنة فيتا', 'افضل 3 منتجات من حيث نسبه البروتين'):\n"
     "   - action: 'search'\n"
     "   - intent: 'search'\n"
     "   - clean_query: Clean searchable grocery entity. Strip numbers ('5', '3'), superlatives ('افضل', 'اجود', 'ارخص'), and fillers ('انواع', 'منتجات').\n"
-    "   - For protein queries ('بروتين'): clean_query='تونة صدور دجاج', attribute_focus='protein', limit=3.\n"
+    "   - head_term: Primary product noun.\n"
+    "   - qualifiers: Secondary attributes.\n"
+    "   - For protein queries ('بروتين'): clean_query='تونة صدور دجاج', head_term='تونة', attribute_focus='protein', limit=3.\n"
     "   - limit: Extracted number (e.g. 5, 3), default: 10.\n"
     "   - sort_by: 'price_asc' if cheapest requested ('ارخص', 'مرتبين حسب السعر'), 'price_desc' if most expensive ('اغلى'), else 'relevance'.\n\n"
     "4. STANDALONE SORT (e.g. 'رتبهم من الارخص', 'رتب الاسعار تنازلي'):\n"
     "   - action: 'sort'\n"
     "   - intent: 'sort'\n"
     "   - clean_query: null\n"
+    "   - head_term: null\n"
     "   - sort_by: 'price_asc' | 'price_desc'\n"
     "   - is_followup: true\n\n"
     "5. COUNT & AGGREGATION INQUIRIES (e.g. 'كم نوع فول موجود', 'كم عدد انواع اللبن', 'how many types of...'):\n"
     "   - action: 'count_inquiry'\n"
     "   - intent: 'count_inquiry'\n"
     "   - clean_query: Target product entity only (e.g. 'فول', 'لبن', 'زيت'). Strip question phrases ('كم نوع', 'كم عدد', 'موجود', 'أنواع').\n"
+    "   - head_term: Primary product entity.\n"
     "   - is_count_query: true\n\n"
     "6. OUT OF SCOPE (weather, politics, sports, coding):\n"
     "   - action: 'out_of_scope'\n"
@@ -799,6 +1093,9 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
             "action": "out_of_scope",
             "intent": "out_of_scope",
             "clean_query": None,
+            "head_term": None,
+            "qualifiers": [],
+            "target_category": None,
             "primary_ingredient": None,
             "recipe_advice": None,
             "conversational_reply": "أنا مساعد سبينيس الذكي للتسوق، أقدر أساعدك في البحث عن المنتجات والأسعار والوصفات في السوبرماركت.",
@@ -821,10 +1118,14 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
         cleaned_entity = sanitize_query(cleaned_entity)
         if not cleaned_entity:
             cleaned_entity = "فول" if "فول" in normalized else "منتجات"
+        ht, qs, tc = extract_head_term_and_qualifiers(cleaned_entity)
         return {
             "action": "count_inquiry",
             "intent": "count_inquiry",
             "clean_query": cleaned_entity,
+            "head_term": ht,
+            "qualifiers": qs,
+            "target_category": tc,
             "primary_ingredient": None,
             "recipe_advice": None,
             "conversational_reply": None,
@@ -832,7 +1133,7 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
             "limit": 10,
             "sort_by": "relevance",
             "attribute_focus": None,
-            "category": None,
+            "category": tc,
             "price_max": None,
             "price_min": None,
             "is_followup": False,
@@ -846,10 +1147,14 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
         dish_raw = recipe_m.group(2).strip() or "لحم"
         dish_raw = re.sub(r"\b(من فضلك|لو سمحت|عايز|عاوز|please)\b", "", dish_raw, flags=re.IGNORECASE).strip()
         clean_dish = "لحم" if any(w in dish_raw for w in ["لحم", "لحمه", "لحمة"]) else (dish_raw or "لحم")
+        rec_cat = "Meat & Poultry" if any(w in clean_dish for w in ["لحم", "فراخ", "دجاج", "كباب", "سمك"]) else "Grocery"
         return {
             "action": "recipe",
             "intent": "recipe",
             "clean_query": clean_dish,
+            "head_term": clean_dish,
+            "qualifiers": [],
+            "target_category": rec_cat,
             "primary_ingredient": clean_dish,
             "recipe_advice": f"إليك مقادير وطريقة تحضير أشهى {clean_dish} من منتجات سبينيس المتوفرة:",
             "conversational_reply": None,
@@ -857,7 +1162,7 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
             "limit": 5,
             "sort_by": "relevance",
             "attribute_focus": None,
-            "category": "meat" if "لحم" in clean_dish else None,
+            "category": rec_cat,
             "price_max": None,
             "price_min": None,
             "is_followup": False,
@@ -878,6 +1183,9 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
             "action": "advisory_qa",
             "intent": "advisory",
             "clean_query": None,
+            "head_term": None,
+            "qualifiers": [],
+            "target_category": None,
             "primary_ingredient": None,
             "recipe_advice": None,
             "conversational_reply": None,
@@ -983,6 +1291,8 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
     if mapped_query:
         clean_query = mapped_query
     else:
+        if brand and cleaned:
+            cleaned = strip_brand_from_query(cleaned, brand) or ""
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         clean_query = cleaned if len(cleaned) >= 2 else None
 
@@ -1021,9 +1331,18 @@ def _fast_fallback_parse(raw_text: str, normalized: str) -> dict[str, Any]:
     if clean_query:
         explicit_fields.append("query")
 
+    # Universal head_term, qualifiers, target_category extraction
+    head_term, qualifiers, inferred_cat = extract_head_term_and_qualifiers(clean_query)
+    if not category:
+        category = inferred_cat
+    target_category = inferred_cat or category
+
     return {
         "intent": intent,
         "clean_query": clean_query,
+        "head_term": head_term,
+        "qualifiers": qualifiers,
+        "target_category": target_category,
         "semantic_expansion": None,
         "limit": limit,
         "sort_by": sort_by,
@@ -1201,11 +1520,39 @@ def parse_query(
                         "total_tokens": resp.usage.total_tokens,
                     }
 
-                # Detect known brand if present
-                if content.get("clean_query"):
-                    detected = find_known_brand(content["clean_query"])
-                    if detected:
-                        content["brand"] = normalize_brand(detected)
+                # Canonicalize brand and strip from clean_query to prevent brand collision
+                extracted_brand = content.get("brand") or find_known_brand(raw_text) or find_known_brand(content.get("clean_query") or "")
+                if extracted_brand:
+                    canonical_brand = normalize_brand(extracted_brand)
+                    content["brand"] = canonical_brand
+                    if content.get("clean_query"):
+                        stripped_cq = strip_brand_from_query(content["clean_query"], canonical_brand)
+                        content["clean_query"] = stripped_cq if stripped_cq and len(stripped_cq) >= 2 else None
+
+                # Normalize and ensure head_term, qualifiers, target_category
+                cq = content.get("clean_query")
+                ht = content.get("head_term")
+                qs = content.get("qualifiers")
+                tc = content.get("target_category") or content.get("category")
+
+                if cq:
+                    auto_ht, auto_qs, auto_tc = extract_head_term_and_qualifiers(cq)
+                    if not ht:
+                        ht = auto_ht
+                    if not qs:
+                        qs = auto_qs
+                    if not tc:
+                        tc = auto_tc
+                if ht and content.get("brand"):
+                    stripped_ht = strip_brand_from_query(ht, content["brand"])
+                    if stripped_ht:
+                        ht = stripped_ht
+
+                content["head_term"] = ht
+                content["qualifiers"] = qs if isinstance(qs, list) else ([str(qs)] if qs else [])
+                content["target_category"] = tc
+                if not content.get("category"):
+                    content["category"] = tc
 
                 explicit_fields = []
                 if content.get("brand"):

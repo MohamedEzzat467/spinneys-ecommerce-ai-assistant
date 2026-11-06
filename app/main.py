@@ -32,7 +32,7 @@ load_dotenv(ROOT / ".env")
 
 from app.retrieval.vector_store import VectorStore, SearchFilters, SearchResult
 from app.retrieval.retriever import ProductRetriever
-from app.nlu.parser import ParseRequest, ParseResult, parse_query, sanitize_query, ADVISORY_RE, PRODUCT_ENTITY_RE
+from app.nlu.parser import ParseRequest, ParseResult, parse_query, sanitize_query, strip_brand_from_query, ADVISORY_RE, PRODUCT_ENTITY_RE
 from app.state.context import SessionManager, SessionState
 from app.store.service import StoreService
 from app.core.llm import get_llm_client
@@ -457,6 +457,11 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
 
         # === ROUTE 5: CATALOG SEARCH & REFINEMENTS ===
         target_query = nlu.clean_query or nlu.semantic_expansion or state.query or request.message
+        active_brand = nlu.brand or state.brand
+        if active_brand and target_query:
+            stripped = strip_brand_from_query(target_query, active_brand)
+            if stripped:
+                target_query = stripped
         req_limit = nlu.limit or 10
 
         retrieval_mode = "hybrid" if (retriever.hybrid_engine.vector_store and retriever.hybrid_engine.vector_store.is_ready()) else "auto"
@@ -464,6 +469,12 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
         overrides["query"] = target_query
         if nlu.category:
             overrides["category"] = nlu.category
+        if nlu.target_category:
+            overrides["target_category"] = nlu.target_category
+        if nlu.head_term:
+            overrides["head_term"] = nlu.head_term
+        if nlu.qualifiers:
+            overrides["qualifiers"] = nlu.qualifiers
         if nlu.attribute_focus:
             overrides["attribute_focus"] = nlu.attribute_focus
 
@@ -472,6 +483,9 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
             limit=max(req_limit * 3, 20),
             mode=retrieval_mode,
             filter_overrides=overrides,
+            head_term=nlu.head_term,
+            qualifiers=nlu.qualifiers,
+            target_category=nlu.target_category,
         )
 
         matched_products = [
@@ -497,15 +511,53 @@ async def chat_conversation(request: ChatRequest) -> ChatResponse:
 
         # Formulate clean conversational reply
         if count == 0:
-            filter_desc = []
-            if state.brand:
-                filter_desc.append(f"ماركة {state.brand}")
-            if state.price_max:
-                filter_desc.append(f"أقل من {state.price_max} جنيه")
-            if state.in_stock:
-                filter_desc.append("المتوفر فقط")
-            suffix = f" مع فلاتر: {', '.join(filter_desc)}" if filter_desc else ""
-            reply = f"للأسف لم أجد منتجات تطابق بحثك عن '{target_query}'{suffix}."
+            # Empty Filter Fallback Guarantee:
+            # If price constraint eliminated matching head-term items, retrieve lowest-priced items
+            # without price filter and explain the minimum available price to customer.
+            effective_head = nlu.head_term or target_query
+            p_max_val = state.price_max if state.price_max is not None else active_filters.get("max_price")
+            fallback_done = False
+
+            if p_max_val is not None and effective_head:
+                fallback_filters = dict(overrides)
+                fallback_filters.pop("max_price", None)
+                fallback_filters.pop("price_max", None)
+                fallback_filters["min_price"] = None
+
+                fallback_res = retriever.retrieve(
+                    query=effective_head,
+                    limit=req_limit * 2,
+                    mode=retrieval_mode,
+                    filter_overrides=fallback_filters,
+                    head_term=nlu.head_term,
+                    qualifiers=nlu.qualifiers,
+                    target_category=nlu.target_category,
+                )
+                fallback_prods = [
+                    p for p in fallback_res.get("products", [])
+                    if float(p.get("price", 0.0)) > 0.0
+                ]
+                if fallback_prods:
+                    fallback_prods = sorted(fallback_prods, key=lambda p: float(p.get("price", 0.0)))
+                    min_avail_price = float(fallback_prods[0]["price"])
+                    matched_products = fallback_prods[:req_limit]
+                    state.last_results = matched_products
+                    count = len(matched_products)
+
+                    p_max_disp = int(p_max_val) if float(p_max_val).is_integer() else p_max_val
+                    reply = f"لا تتوفر منتجات من نوع {effective_head} بسعر أقل من {p_max_disp} ج.م، أقل سعر متوفر هو {min_avail_price:.2f} ج.م:"
+                    fallback_done = True
+
+            if not fallback_done:
+                filter_desc = []
+                if state.brand:
+                    filter_desc.append(f"ماركة {state.brand}")
+                if state.price_max:
+                    filter_desc.append(f"أقل من {state.price_max} جنيه")
+                if state.in_stock:
+                    filter_desc.append("المتوفر فقط")
+                suffix = f" مع فلاتر: {', '.join(filter_desc)}" if filter_desc else ""
+                reply = f"للأسف لم أجد منتجات تطابق بحثك عن '{target_query}'{suffix}."
         elif nlu.attribute_focus == "protein":
             reply = "إليك أبرز المنتجات عالية البروتين المتاحة في المتجر (مثل صدور الدواجن والتونة):"
         elif nlu.conversational_reply:
